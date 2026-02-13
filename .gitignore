@@ -76,3 +76,6 @@ Thumbs.db
 
 # Claude
 .claude/settings.local*
+
+comments
+docs/specs/hosted-version-notes.md
