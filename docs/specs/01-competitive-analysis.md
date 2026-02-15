@@ -1,8 +1,8 @@
 # Pro-Context: Competitive Analysis
 
 > **Document**: 01-competitive-analysis.md
-> **Status**: Final
-> **Last Updated**: 2026-02-12
+> **Status**: Final (rev 1)
+> **Last Updated**: 2026-02-16
 
 ---
 
@@ -10,13 +10,16 @@
 
 This analysis examines the landscape of MCP documentation servers through the lens of **accuracy** — the degree to which a server returns correct, relevant documentation that enables an agent to complete its task. Token efficiency matters, but only as a secondary concern after accuracy clears a useful threshold.
 
-The analysis is structured in three tiers:
+The analysis is structured in four tiers:
 
-1. **Industry solutions** (Context7, Docfork, Deepcon) — battle-tested products with real user bases and measurable performance data.
-2. **The llms.txt ecosystem** — a growing standard that changes how documentation is published and consumed, with major platform support from Mintlify, Fern, and others. LangChain's mcpdoc server demonstrates a fundamentally different retrieval paradigm that leverages the reading capabilities of modern AI agents.
-3. **Community solutions** (Rtfmbro, King-Context, docs-mcp-server) — open-source projects with interesting ideas but limited validation.
+1. **Documentation retrieval solutions** (Context7, Docfork, Deepcon) — battle-tested products that serve library documentation to coding agents, with real user bases and measurable performance data.
+2. **Code analysis platforms** (DeepWiki) — AI-powered systems that generate documentation from source code analysis rather than serving official docs. These represent an alternative approach to the same underlying problem.
+3. **The llms.txt ecosystem** — a growing standard that changes how documentation is published and consumed, with major platform support from Mintlify, Fern, and others. LangChain's mcpdoc server demonstrates a fundamentally different retrieval paradigm that leverages the reading capabilities of modern AI agents.
+4. **Community solutions** (Rtfmbro, King-Context, docs-mcp-server) — open-source projects with interesting ideas but limited validation.
 
 **Key finding**: The highest-accuracy approach (Deepcon, 90%) uses a query-understanding model + semantic search + reranking pipeline. But a fundamentally different paradigm is emerging: instead of the server deciding what's relevant, give the agent a structured index and let it navigate documentation itself — the way a human developer would browse docs. LangChain's mcpdoc implements this pattern. Modern coding agents (Claude Code, Cursor, Windsurf) already have the capability to read progressively, follow links, and scroll through content. This capability is underutilized by current MCP doc servers.
+
+Separately, Cognition's DeepWiki represents a different approach entirely: AI-generated documentation from source code analysis. It's well-funded (50K+ repos indexed, ~$300K compute for initial indexing) and has an MCP server, but its source of truth is AI-inferred rather than author-written — a fundamental distinction for accuracy.
 
 ---
 
@@ -68,7 +71,7 @@ The most important insight: **conceptual misses are the hardest failure mode**. 
 
 ---
 
-## 3. Industry Solutions
+## 3. Documentation Retrieval Solutions
 
 ### 3.1 Context7 (Upstash)
 
@@ -270,13 +273,103 @@ This is the core architectural insight: **a retrieval system that understands th
 
 Deepcon demonstrates that **query understanding is the key differentiator for accuracy**. The leap from 65% to 90% isn't about better chunks or faster caching — it's about understanding what the developer is actually asking and then finding the right content.
 
-For an open-source project that can't embed a proprietary query model, this insight still applies: we need approaches that go beyond keyword matching. This could mean leveraging the agent's own reasoning capability (which is already an LLM) rather than trying to replicate a query-understanding model on the server side. This connects directly to the agent reading paradigm discussed in Section 5.
+For an open-source project that can't embed a proprietary query model, this insight still applies: we need approaches that go beyond keyword matching. This could mean leveraging the agent's own reasoning capability (which is already an LLM) rather than trying to replicate a query-understanding model on the server side. This connects directly to the agent reading paradigm discussed in Section 6.
 
 ---
 
-## 4. The llms.txt Ecosystem
+## 4. Code Analysis Platforms
 
-### 4.1 The Standard
+### 4.1 DeepWiki (Cognition AI)
+
+**Website**: [deepwiki.com](https://deepwiki.com/)
+**Blog**: [cognition.ai/blog/deepwiki](https://cognition.ai/blog/deepwiki)
+**Architecture**: AI code analysis + RAG + wiki generation
+**License**: Proprietary (free for public repos, paid for private via Devin account)
+**Status**: Active. Built by Cognition AI (the team behind Devin). 50K+ repos indexed. MCP server available.
+
+#### How It Works
+
+DeepWiki auto-generates structured, wiki-style documentation for any GitHub repository by analyzing its source code, configuration files, and existing documentation. You can access the wiki for any repo by replacing `github.com` with `deepwiki.com` in the URL.
+
+```
+┌──────────────┐     ┌──────────────────────────────────────────┐
+│  MCP Client  │────▶│  DeepWiki                                 │
+│              │◀────│                                            │
+└──────────────┘     │  MCP Tools:                               │
+                     │  1. read_wiki_structure (TOC)              │
+                     │  2. read_wiki_contents  (page content)     │
+                     │  3. ask_question         (RAG Q&A)         │
+                     │                                            │
+                     │  ┌────────────────────────────────┐       │
+                     │  │  Pre-indexed Repo Analysis      │       │
+                     │  │  50K+ repos, 4B lines of code  │       │
+                     │  │  ~$300K compute for indexing     │       │
+                     │  └────────────────────────────────┘       │
+                     │                                            │
+                     │  ┌────────────────────────────────┐       │
+                     │  │  AI Analysis Pipeline           │       │
+                     │  │  - Code understanding models    │       │
+                     │  │  - Relationship mapping         │       │
+                     │  │  - Knowledge summarization      │       │
+                     │  │  - Mermaid diagram generation   │       │
+                     │  └────────────────────────────────┘       │
+                     └──────────────────────────────────────────┘
+```
+
+#### Key Features
+
+- **Pre-indexed at scale**: 50K+ top public GitHub repos indexed, 4 billion lines of code analyzed
+- **MCP server**: 3 tools — `read_wiki_structure` (TOC), `read_wiki_contents` (page content), `ask_question` (RAG-powered Q&A)
+- **Deep Research Mode**: Extended analysis mimicking a senior code reviewer — identifies bugs, optimization opportunities, architectural critiques
+- **Auto-generated diagrams**: Mermaid.js flowcharts and dependency graphs
+- **Customizable via `.devin/wiki.json`**: Repository owners can steer wiki generation, specify pages, and add notes
+
+#### The Fundamental Distinction: AI-Inferred vs Author-Written
+
+DeepWiki and the documentation retrieval servers (Context7, Docfork, Deepcon, Pro-Context) solve overlapping but distinct problems:
+
+| Dimension | DeepWiki | Documentation Retrieval Servers |
+|-----------|----------|-------------------------------|
+| **Source of truth** | AI analysis of source code | Official documentation written by library maintainers |
+| **Content** | Architecture diagrams, code relationships, AI-inferred explanations | API references, guides, examples, changelogs, migration notes |
+| **Accuracy model** | Only as good as the AI's code understanding | As accurate as the official docs |
+| **Coverage** | Any public GitHub repo (50K+ pre-indexed, any repo on-demand) | Libraries with llms.txt, docs/, or custom sources |
+| **Strengths** | "How does this codebase work?" — architecture, code flow, internal relationships | "How do I use this API?" — correct parameters, patterns, version-specific behavior |
+| **Failure modes** | AI misinterprets code intent, infers incorrect behavior, misses undocumented conventions | Official docs are incomplete, outdated, or poorly structured |
+
+For a coding agent trying to use `ChatOpenAI(streaming=True)`, the official LangChain docs are the authoritative source. DeepWiki's AI-generated analysis of the LangChain source code might get the parameters right, but it might also miss nuances that the official docs capture — deprecated patterns, recommended alternatives, version-specific caveats.
+
+Conversely, for understanding how a codebase is architectured or how modules interact — questions that official docs may not address — DeepWiki's code analysis is genuinely useful.
+
+#### Strengths
+
+- **Massive scale**: 50K+ repos, backed by Cognition's resources (~$300K compute for initial indexing alone)
+- **Universal coverage**: Works on any public GitHub repo, not just those with llms.txt or good documentation
+- **MCP server**: Well-structured 3-tool interface (TOC, content, Q&A)
+- **Complementary to official docs**: Provides insights (architecture, code flow) that official docs often don't cover
+- **Zero effort for library authors**: Documentation is generated automatically
+
+#### Weaknesses
+
+- **Not authoritative**: Content is AI-generated, not author-written. For API usage questions, this is a liability
+- **Proprietary and centralized**: Cannot self-host. Free for public repos, paid for private (requires Devin account)
+- **Freshness depends on re-indexing**: When a library updates, the wiki must be regenerated
+- **Community MCP server blocked**: Cognition has blocked scraping of deepwiki.com, limiting community-built alternatives
+- **No version awareness**: Wiki is generated for the default branch; no mechanism for version-specific documentation
+
+#### What We Learn
+
+DeepWiki is important to acknowledge because it's a well-funded alternative that coding agents could use instead of documentation retrieval servers. A developer with DeepWiki's MCP server configured may get "good enough" results for many queries without needing Pro-Context.
+
+However, the key insight is about **source of truth**. DeepWiki tells you what the code *does* (as inferred by AI). Pro-Context tells you what the code *should do* (as documented by the authors). For correctness-critical tasks — using the right API, migrating between versions, understanding deprecated patterns — official documentation is the authoritative source. DeepWiki is complementary, not a substitute.
+
+The operational insight is also instructive: Cognition spent ~$300K pre-indexing 50K repos. This provides a real data point for the cost of the pre-indexed approach at scale.
+
+---
+
+## 5. The llms.txt Ecosystem
+
+### 5.1 The Standard
 
 The `/llms.txt` standard, proposed by Jeremy Howard (co-founder of Answer.AI) in September 2024, provides a way for websites to publish LLM-friendly documentation. The format is intentionally simple: a markdown file with a title, summary, and links to detailed pages.
 
@@ -290,7 +383,7 @@ Two file variants exist:
 
 The size ratio between `llms.txt` and `llms-full.txt` can be enormous — Anthropic's is 57x. This is the core design tension: `llms.txt` is a navigable index that fits in any context window, while `llms-full.txt` contains everything but exceeds most context windows.
 
-### 4.2 Adoption Landscape
+### 5.2 Adoption Landscape
 
 As of early 2026, llms.txt adoption has crossed a critical threshold thanks to documentation platform support:
 
@@ -325,7 +418,7 @@ As of early 2026, llms.txt adoption has crossed a critical threshold thanks to d
 
 **Quantitative adoption**: The llms-txt-hub directory lists 500+ implementations. NerdyData found 951 domains with llms.txt as of July 2025. The actual number is likely higher post-Mintlify rollout.
 
-### 4.3 How AI Agents Actually Use llms.txt
+### 5.3 How AI Agents Actually Use llms.txt
 
 Real-world usage data provides a critical insight: **AI agents visit llms-full.txt more than twice as often as llms.txt**. This suggests agents prefer the complete content when it's available, even at the cost of more tokens.
 
@@ -340,7 +433,7 @@ The optimal pattern — which LangChain's mcpdoc implements — is:
 
 This is exactly how a human developer uses documentation: scan the table of contents, navigate to the relevant section, read it.
 
-### 4.4 What llms.txt Gets Right for Our Use Case
+### 5.4 What llms.txt Gets Right for Our Use Case
 
 1. **Authoritative source**: llms.txt files come from the library authors themselves, hosted on official documentation sites. This is the highest-quality source for documentation.
 2. **Structured for navigation**: The index + individual pages pattern maps naturally to how agents can browse content.
@@ -349,7 +442,7 @@ This is exactly how a human developer uses documentation: scan the table of cont
 5. **Growing coverage**: With Mintlify (10,000+ companies) and Fern auto-generating llms.txt, coverage will continue to expand without any action from library maintainers.
 6. **Token-efficient delivery**: Up to 10x token reduction vs serving HTML, per real-world reports.
 
-### 4.5 What llms.txt Gets Wrong (or Doesn't Address)
+### 5.5 What llms.txt Gets Wrong (or Doesn't Address)
 
 1. **No search semantics**: llms.txt is a flat index. It has no concept of relevance, ranking, or semantic similarity. Finding the right page for a given question depends entirely on the agent's ability to match its question to the one-sentence descriptions in the index.
 2. **Coverage gaps**: Many popular Python libraries (FastAPI, Django, Flask, requests, SQLAlchemy, NumPy, pandas) do not have llms.txt. For these, we need fallback sources.
@@ -360,9 +453,9 @@ This is exactly how a human developer uses documentation: scan the table of cont
 
 ---
 
-## 5. The Agent Reading Paradigm
+## 6. The Agent Reading Paradigm
 
-### 5.1 How Modern Coding Agents Already Work
+### 6.1 How Modern Coding Agents Already Work
 
 Modern AI coding agents (Claude Code, Cursor, Windsurf) are not simple prompt-response systems. They have sophisticated capabilities:
 
@@ -373,7 +466,7 @@ Modern AI coding agents (Claude Code, Cursor, Windsurf) are not simple prompt-re
 
 These capabilities are directly relevant to documentation retrieval. An agent doesn't need a server to pre-chew documentation into perfect chunks — it can navigate, read, and extract what it needs, just like a human developer browsing docs.
 
-### 5.2 LangChain's mcpdoc: The Agent-Driven Pattern
+### 6.2 LangChain's mcpdoc: The Agent-Driven Pattern
 
 LangChain's [mcpdoc](https://github.com/langchain-ai/mcpdoc) server demonstrates this paradigm. It's an open-source MCP server with a fundamentally different approach from Context7, Docfork, and Deepcon.
 
@@ -426,7 +519,7 @@ mcpdoc is minimal by design. It has real limitations:
 - **Domain-locked security**: Can only fetch from pre-configured domains. This is a good security feature but limits flexibility.
 - **Token cost of browsing**: Each navigation step costs a tool call and tokens for the returned content. An agent might make 3-5 calls to find what it needs, vs a server-decides approach that ideally returns the right answer in 1 call.
 
-### 5.3 The Hybrid Opportunity
+### 6.3 The Hybrid Opportunity
 
 Neither approach alone is optimal:
 
@@ -439,11 +532,11 @@ This is analogous to how a developer uses Google: search narrows the results to 
 
 ---
 
-## 6. Documentation Platforms as Infrastructure
+## 7. Documentation Platforms as Infrastructure
 
 A development that changes the landscape significantly: documentation platforms themselves are becoming the infrastructure layer for AI documentation access.
 
-### 6.1 Mintlify
+### 7.1 Mintlify
 
 **Scale**: 10,000+ companies, 8-figure ARR, 1M+ monthly AI queries.
 
@@ -457,13 +550,13 @@ Mintlify auto-generates for every hosted docs site:
 
 Vercel reported going from <1% to 10% of signups coming from ChatGPT in six months, attributed partly to AI-optimized documentation.
 
-### 6.2 Fern
+### 7.2 Fern
 
 **Features**: Auto-generates llms.txt, llms-full.txt, per-page markdown, and a dedicated MCP server for each hosted docs site.
 
 Fern's approach is notable because it generates **both** the documentation files and the MCP server automatically. A library that hosts its docs on Fern gets an MCP server for free.
 
-### 6.3 Implications
+### 7.3 Implications
 
 The doc platform approach means:
 
@@ -473,11 +566,11 @@ The doc platform approach means:
 
 ---
 
-## 7. Community Solutions
+## 8. Community Solutions
 
 These projects are smaller in scale and user base but contribute interesting ideas to the design space.
 
-### 7.1 Rtfmbro
+### 8.1 Rtfmbro
 
 **Repository**: [github.com/marckrenn/rtfmbro-mcp](https://github.com/marckrenn/rtfmbro-mcp)
 **License**: MIT
@@ -486,7 +579,7 @@ These projects are smaller in scale and user base but contribute interesting ide
 
 **Weakness**: Returns raw documentation dumps without any chunking or relevance filtering. Entire files are sent to the agent, wasting tokens.
 
-### 7.2 King-Context
+### 8.2 King-Context
 
 **Repository**: [github.com/deandevz/king-context](https://github.com/deandevz/king-context)
 **License**: MIT
@@ -495,7 +588,7 @@ These projects are smaller in scale and user base but contribute interesting ide
 
 **Caveats**: These numbers are self-reported from a small project without independent verification. The cascade concept is sound in principle — check cheap sources before expensive ones — but the specific resolution rates should not be treated as reliable data.
 
-### 7.3 docs-mcp-server (arabold)
+### 8.3 docs-mcp-server (arabold)
 
 **Repository**: [github.com/arabold/docs-mcp-server](https://github.com/arabold/docs-mcp-server)
 **License**: MIT
@@ -506,9 +599,9 @@ These projects are smaller in scale and user base but contribute interesting ide
 
 ---
 
-## 8. Accuracy Analysis
+## 9. Accuracy Analysis
 
-### 8.1 What Drives Accuracy?
+### 9.1 What Drives Accuracy?
 
 Based on the analysis of all solutions above, accuracy in documentation retrieval is driven by:
 
@@ -522,7 +615,7 @@ Based on the analysis of all solutions above, accuracy in documentation retrieva
 | **Freshness** | Medium | Stale docs create subtle failures — the API exists but the signature changed. SHA-based freshness checking (Rtfmbro) addresses this. |
 | **Chunk granularity** | Medium | Too-large chunks waste tokens and dilute relevance. Too-small chunks lose context. docs-mcp-server and Deepcon get this right; Context7 does not. |
 
-### 8.2 The Two Paths to Accuracy
+### 9.2 The Two Paths to Accuracy
 
 The analysis reveals two fundamentally different strategies for achieving high accuracy:
 
@@ -551,7 +644,7 @@ Provide the agent with structured documentation access (indexes, per-page retrie
 
 Use server-side search to narrow candidates, then provide the agent with navigable documentation to make the final relevance judgment. The server does coarse filtering; the agent does fine-grained selection.
 
-### 8.3 Accuracy vs Token Efficiency Tradeoff
+### 9.3 Accuracy vs Token Efficiency Tradeoff
 
 | Solution | Accuracy | Avg Tokens | Strategy |
 |----------|----------|-----------|----------|
@@ -564,9 +657,9 @@ Note: Deepcon achieves both the highest accuracy AND the lowest token usage. Thi
 
 ---
 
-## 9. Feature Comparison
+## 10. Feature Comparison
 
-### 9.1 Industry Solutions
+### 10.1 Documentation Retrieval Solutions
 
 | Feature | Context7 | Docfork | Deepcon |
 |---------|----------|---------|--------|
@@ -583,18 +676,34 @@ Note: Deepcon achieves both the highest accuracy AND the lowest token usage. Thi
 | llms.txt native | No | No | No |
 | Agent navigation | No | No | No |
 
-### 9.2 Documentation Access Patterns
+### 10.2 Code Analysis Platforms
+
+| Feature | DeepWiki |
+|---------|----------|
+| Source of truth | AI-generated from source code |
+| Published accuracy | No data (AI-inferred, not benchmarked against official docs) |
+| Coverage | 50K+ repos (any public GitHub repo) |
+| Self-hostable | No |
+| Open source | No (open-source alternatives exist: DeepWiki-Open, OpenDeepWiki) |
+| Version-aware | No (default branch only) |
+| Multi-language | Any language in the repo |
+| MCP server | Yes (3 tools) |
+| Agent navigation | Yes (TOC + page content) |
+| llms.txt native | No |
+
+### 10.3 Documentation Access Patterns
 
 | Pattern | Who Uses It | Accuracy Model | Token Model |
 |---------|------------|----------------|-------------|
 | Pre-chunked retrieval | Context7, Docfork | Server determines relevance | Fixed per response |
 | Query model + semantic search | Deepcon | AI model determines relevance | Optimized per response |
 | Index + agent navigation | mcpdoc | Agent LLM determines relevance | Variable (multi-call) |
+| AI-generated code analysis | DeepWiki | AI infers from source code | Variable (wiki-style) |
 | Raw file dump | Rtfmbro | No relevance filtering | Very high |
 
 ---
 
-## 10. Key Observations
+## 11. Key Observations
 
 These are analytical observations, not design decisions. Design decisions will be made in subsequent documents.
 
@@ -622,13 +731,17 @@ Every "server decides what's relevant" solution shares a fundamental limitation:
 
 Rtfmbro's SHA-based freshness checking and the general two-tier cache pattern (memory LRU + persistent store) are well-understood and proven. These are implementation details, not differentiators.
 
-### Observation 7: No Existing Solution Combines llms.txt + Agent Navigation + Caching
+### Observation 7: Code Analysis Is Complementary, Not Competing
+
+DeepWiki (Cognition) demonstrates that AI-generated documentation from source code is viable at scale (50K+ repos, ~$300K compute). However, AI-inferred documentation and author-written documentation serve different purposes. For correctness-critical tasks — using the right API parameters, migrating between versions, understanding deprecations — official documentation is the authoritative source. Code analysis platforms are complementary for understanding architecture and code flow, but they are not a substitute for official docs. A coding agent ideally has access to both.
+
+### Observation 8: No Existing Solution Combines llms.txt + Agent Navigation + Caching
 
 mcpdoc has the right paradigm (agent-driven navigation via llms.txt) but lacks caching, version resolution, search fallback, and multi-source support. Context7/Docfork/Deepcon have caching and coverage but don't leverage llms.txt or agent navigation. The gap is a solution that combines both.
 
 ---
 
-## 11. Open Questions
+## 12. Open Questions
 
 These questions should be addressed in subsequent design and specification documents:
 
@@ -646,14 +759,23 @@ These questions should be addressed in subsequent design and specification docum
 
 ---
 
-## 12. References
+## 13. References
 
-### Industry Solutions
+### Documentation Retrieval Solutions
 - [Context7 MCP Server](https://github.com/upstash/context7) — Apache-2.0
 - [Docfork MCP](https://github.com/docfork/docfork) — Proprietary
 - [Deepcon](https://deepcon.ai/) — Proprietary
 - [Deepcon Show HN Discussion](https://news.ycombinator.com/item?id=45839378)
 - [Deepcon Documentation](https://opactor.mintlify.app/introduction)
+
+### Code Analysis Platforms
+- [DeepWiki](https://deepwiki.com/) — Cognition AI
+- [Cognition Blog: DeepWiki](https://cognition.ai/blog/deepwiki)
+- [Cognition Blog: DeepWiki MCP Server](https://cognition.ai/blog/deepwiki-mcp-server)
+- [DeepWiki on Devin Docs](https://docs.devin.ai/work-with-devin/deepwiki)
+- [DeepWiki MCP on Devin Docs](https://docs.devin.ai/work-with-devin/deepwiki-mcp)
+- [DeepWiki-Open (community)](https://github.com/AsyncFuncAI/deepwiki-open) — MIT
+- [OpenDeepWiki (community)](https://github.com/AIDotNet/OpenDeepWiki) — MIT
 
 ### llms.txt Ecosystem
 - [llms.txt Standard (llmstxt.org)](https://llmstxt.org/)
