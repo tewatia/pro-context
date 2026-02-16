@@ -142,17 +142,16 @@ MCP Client
   │    │
   │    ├─ 1. Look up libraryId in registry (exact match)
   │    ├─ 2. If not found → attempt package registry resolution
-  │    ├─ 3. Validate language (error if multi-language and unspecified)
-  │    ├─ 4. Resolve version (latest stable if omitted)
-  │    ├─ 5. Fetch TOC via adapter chain (llms.txt → GitHub → Custom)
-  │    ├─ 6. Extract availableSections from TOC
-  │    ├─ 7. Apply sections filter if specified
-  │    ├─ 8. Cache TOC, add to session resolved list
-  │    └─ 9. Return { libraryId, versions, sources, toc, availableSections }
+  │    ├─ 3. Resolve version (latest stable if omitted)
+  │    ├─ 4. Fetch TOC via adapter chain (llms.txt → GitHub → Custom)
+  │    ├─ 5. Extract availableSections from TOC
+  │    ├─ 6. Apply sections filter if specified
+  │    ├─ 7. Cache TOC, add to session resolved list
+  │    └─ 8. Return { libraryId, versions, sources, toc, availableSections }
   │
   ├─ get-docs([{libraryId: "langchain-ai/langchain", version: "0.3.14"}], "chat models")
   │    │
-  │    ├─ 1. For each library: resolve version, validate language
+  │    ├─ 1. For each library: resolve version
   │    ├─ 2. Cache lookup: memory LRU → SQLite
   │    │    ├─ HIT (fresh) → use cached content
   │    │    ├─ HIT (stale) → use cached + trigger background refresh
@@ -270,7 +269,8 @@ interface TocEntry {
 interface LibraryInfo {
   libraryId: string;
   name: string;
-  language: string;
+  /** Informational metadata — not used for routing or validation */
+  languages: string[];
   defaultVersion: string;
   availableVersions: string[];
   sources: string[];
@@ -367,7 +367,6 @@ interface PageResult {
 
 type ErrorCode =
   | "LIBRARY_NOT_FOUND"
-  | "LANGUAGE_REQUIRED"
   | "VERSION_NOT_FOUND"
   | "TOPIC_NOT_FOUND"
   | "PAGE_NOT_FOUND"
@@ -1151,7 +1150,6 @@ const GetDocsInput = z.object({
   libraries: z.array(z.object({
     libraryId: z.string().min(1).max(200).regex(/^[a-zA-Z0-9\-_./]+$/),
     version: z.string().max(50).optional(),
-    language: z.string().max(50).optional(),
   })).min(1).max(10),
   topic: z.string().min(1).max(500),
   maxTokens: z.number().int().min(500).max(10000).default(5000),
@@ -1428,12 +1426,11 @@ CREATE INDEX IF NOT EXISTS idx_library_metadata_package ON library_metadata(pack
 
 -- Session state (resolved libraries in current session)
 CREATE TABLE IF NOT EXISTS session_libraries (
-  library_id TEXT NOT NULL,
+  library_id TEXT NOT NULL PRIMARY KEY,
   name TEXT NOT NULL,
-  language TEXT NOT NULL,
+  languages TEXT NOT NULL,           -- JSON array (informational metadata)
   version TEXT NOT NULL,
-  resolved_at TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (library_id, language)
+  resolved_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 

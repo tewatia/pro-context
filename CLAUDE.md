@@ -32,6 +32,14 @@ All implementation decisions are captured in these five spec documents, which ar
 - `docs/specs/03-technical-spec.md` — System architecture, data models, two-tier cache, BM25 search, database schema (7 SQLite tables)
 - `docs/specs/04-implementation-guide.md` — Project structure, dependencies, coding conventions, 5 implementation phases, testing strategy
 - `docs/specs/05-library-resolution.md` — Library name → documentation source mapping, resolution algorithm (6 steps), registry strategy
+- `docs/specs/05-library-resolution-proposed.md` — **[PROPOSED]** Clean rewrite of library resolution strategy, focused and uncluttered
+
+### Research Documents
+
+Additional research documents that inform the specifications:
+
+- `docs/research/llms-txt-deployment-patterns.md` — Comprehensive survey of 70+ libraries showing real-world llms.txt deployment patterns, URL structures, version handling, and multi-variant strategies
+- `docs/research/llms-txt-resolution-strategy.md` — Approved strategy for resolving library names to llms.txt URLs: registry-first approach with smart fallback, hub detection, content validation, and maintenance plan
 
 You are allowed to create new documents if you think that the discussion warrants it. Make sure you edit this section to link to any new documents you create.
 

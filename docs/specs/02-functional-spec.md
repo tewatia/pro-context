@@ -53,7 +53,7 @@
   - [9.4 Rate Limiting (HTTP Mode)](#94-rate-limiting-http-mode)
 - [10. Version Resolution](#10-version-resolution)
   - [10.1 Resolution Rules](#101-resolution-rules)
-  - [10.2 Language Resolution Rules](#102-language-resolution-rules)
+  - [10.2 Language Handling](#102-language-handling)
   - [10.3 Package Registry Integration](#103-package-registry-integration)
   - [10.4 Version → Documentation URL Mapping](#104-version--documentation-url-mapping)
   - [10.5 Version Caching](#105-version-caching)
@@ -196,7 +196,7 @@ The TOC is returned by `get-library-info`. It is accessed exclusively via tool c
 - Agent calls `get-library-info` with a specific libraryId
 - Server returns TOC, available versions, available sources, and default version
 - Agent can request specific TOC sections or the full TOC
-- If library supports multiple languages and language is not specified, server returns an error asking for clarification
+- For multi-language libraries, the TOC includes all language-specific sections and the agent navigates to the relevant ones
 - TOC contains page titles, URLs, and descriptions suitable for agent navigation
 
 ### US-3: Quick Documentation Lookup (Fast Path)
@@ -286,7 +286,7 @@ Discovers libraries matching a natural language query. This is a pure discovery 
     },
     "language": {
       "type": "string",
-      "description": "Optional language filter (e.g., 'python', 'javascript'). Only needed to disambiguate when the same library name exists across languages."
+      "description": "Optional language filter (e.g., 'python', 'javascript'). Narrows results to DocSources that list this language. Purely a convenience filter — not required."
     }
   },
   "required": ["query"]
@@ -362,10 +362,6 @@ This tool does not require a prior `resolve-library` call. If the agent already 
       "type": "string",
       "description": "Canonical library ID (e.g., 'langchain-ai/langchain'). Can be obtained from resolve-library or known ahead of time."
     },
-    "language": {
-      "type": "string",
-      "description": "Required if the library supports multiple languages. Specifies which language variant to fetch info for."
-    },
     "version": {
       "type": "string",
       "description": "Specific version. Defaults to latest stable if omitted."
@@ -393,9 +389,10 @@ This tool does not require a prior `resolve-library` call. If the agent already 
       "type": "string",
       "description": "Human-readable library name"
     },
-    "language": {
-      "type": "string",
-      "description": "Language for this info response"
+    "languages": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Languages this library is available in (informational metadata)"
     },
     "defaultVersion": {
       "type": "string",
@@ -441,20 +438,18 @@ This tool does not require a prior `resolve-library` call. If the agent already 
 **Behavior:**
 1. Look up `libraryId` in registry (exact match, no fuzzy matching)
 2. If not found in registry, attempt resolution via package registry (PyPI/npm)
-3. If library supports multiple languages and `language` is not provided → return `LANGUAGE_REQUIRED` error listing available languages
-4. Resolve version (if not specified, use latest stable)
-5. Fetch available versions from package registry (cached for 1 hour)
-6. Determine available documentation sources
-7. Fetch and parse the TOC (source-agnostic — the adapter chain handles how)
-8. Extract `availableSections` from TOC entries (unique section names)
-9. If `sections` is specified, filter TOC entries to matching sections
-10. Cache the TOC
-11. Add library to session resolved list
-12. Return library metadata + TOC + availableSections
+3. Resolve version (if not specified, use latest stable)
+4. Fetch available versions from package registry (cached for 1 hour)
+5. Determine available documentation sources
+6. Fetch and parse the TOC (source-agnostic — the adapter chain handles how)
+7. Extract `availableSections` from TOC entries (unique section names)
+8. If `sections` is specified, filter TOC entries to matching sections
+9. Cache the TOC
+10. Add library to session resolved list
+11. Return library metadata + TOC + availableSections
 
 **Error cases:**
 - Library not found → `LIBRARY_NOT_FOUND`
-- Language required → `LANGUAGE_REQUIRED` with available languages list
 - Version not found → `VERSION_NOT_FOUND` with available versions
 - No documentation sources found → returns metadata without TOC, with a note that no docs are indexed
 
@@ -475,12 +470,11 @@ The **fast path** tool. Retrieves focused documentation for a specific topic usi
         "type": "object",
         "properties": {
           "libraryId": { "type": "string", "description": "Canonical library ID" },
-          "version": { "type": "string", "description": "Optional: specific version for this library. Defaults to latest stable." },
-          "language": { "type": "string", "description": "Optional: required if this library supports multiple languages." }
+          "version": { "type": "string", "description": "Optional: specific version for this library. Defaults to latest stable." }
         },
         "required": ["libraryId"]
       },
-      "description": "One or more libraries to search. Each can have its own version and language."
+      "description": "One or more libraries to search. Each can have its own version."
     },
     "topic": {
       "type": "string",
@@ -557,11 +551,10 @@ The **fast path** tool. Retrieves focused documentation for a specific topic usi
 **Behavior:**
 1. For each library in the `libraries` array:
    a. Resolve version (if not specified, use latest stable)
-   b. Validate language if library supports multiple
-   c. Check cache (memory → SQLite) for matching (libraryId, language, version, topic)
-   d. If cached and fresh → use cached content
-   e. If cached but stale → use stale content, trigger background refresh
-   f. If not cached → fetch documentation via adapter chain, chunk into sections, index with BM25
+   b. Check cache (memory → SQLite) for matching (libraryId, version, topic)
+   c. If cached and fresh → use cached content
+   d. If cached but stale → use stale content, trigger background refresh
+   e. If not cached → fetch documentation via adapter chain, chunk into sections, index with BM25
 2. Rank chunks across all specified libraries by topic relevance
 3. Select top chunk(s) within `maxTokens` budget
 4. Identify related pages from the TOC that the agent might want to read for more context
@@ -572,7 +565,6 @@ The **fast path** tool. Retrieves focused documentation for a specific topic usi
 
 **Error cases:**
 - Any library in the array not found → `LIBRARY_NOT_FOUND` (identifies which library)
-- Language required for a multi-language library → `LANGUAGE_REQUIRED`
 - Topic not found across all specified libraries → `TOPIC_NOT_FOUND` with suggestion to try `search-docs` or browse the TOC via `get-library-info`
 - All sources unavailable → serve stale cache or `SOURCE_UNAVAILABLE`
 
@@ -595,10 +587,6 @@ Searches across indexed documentation and returns ranked results with URLs. Opti
       "type": "array",
       "items": { "type": "string" },
       "description": "Optional: restrict search to these libraries. If omitted, searches across all indexed content."
-    },
-    "language": {
-      "type": "string",
-      "description": "Optional language filter."
     },
     "version": {
       "type": "string",
@@ -802,8 +790,8 @@ Resources provide data that agents can access without tool calls.
 ```json
 {
   "libraries": [
-    { "id": "langchain-ai/langchain", "name": "LangChain", "language": "python", "version": "0.3.14" },
-    { "id": "pydantic/pydantic", "name": "Pydantic", "language": "python", "version": "2.10.0" }
+    { "id": "langchain-ai/langchain", "name": "LangChain", "languages": ["python"], "version": "0.3.14" },
+    { "id": "pydantic/pydantic", "name": "Pydantic", "languages": ["python"], "version": "2.10.0" }
   ]
 }
 ```
@@ -1056,11 +1044,12 @@ All tool inputs are validated with Zod schemas at the MCP boundary:
 3. **No version**: Resolve to latest stable release
 4. **Invalid version**: Return `VERSION_NOT_FOUND` with available versions
 
-### 10.2 Language Resolution Rules
+### 10.2 Language Handling
 
-1. **Library supports one language**: Language parameter is optional, ignored if provided
-2. **Library supports multiple languages**: Language parameter is required. If omitted, return `LANGUAGE_REQUIRED` error listing available languages
-3. **Language filter on resolve-library**: Optional — only used to narrow discovery results
+Language is **not** a server-side routing concern. The `languages` field on a DocSource is informational metadata — it tells the agent what languages a library supports but the server does not validate or enforce it.
+
+1. **`resolve-library`**: Accepts an optional `language` filter to narrow discovery results (e.g., only return DocSources listing `"python"`). This is a convenience filter, not a requirement.
+2. **All other tools**: No language parameter. For multi-language documentation sites (e.g., protobuf.dev), the TOC contains language-specific sections and the agent navigates to the relevant pages based on its own context.
 
 ### 10.3 Package Registry Integration
 
@@ -1109,7 +1098,6 @@ The known-libraries registry stores the URL pattern for each library. For librar
 | Code | Trigger | Suggestion |
 |------|---------|-----------|
 | `LIBRARY_NOT_FOUND` | Unknown library ID | Did you mean '{suggestion}'? Use resolve-library to discover libraries. |
-| `LANGUAGE_REQUIRED` | Multi-language library, no language specified | Available languages: {list}. Specify the language parameter. |
 | `VERSION_NOT_FOUND` | Invalid version | Available versions: {list} |
 | `TOPIC_NOT_FOUND` | BM25 search finds nothing for topic | Try search-docs for broader results, or browse the TOC via get-library-info. |
 | `PAGE_NOT_FOUND` | read-page URL returns 404 | Check the URL or use get-library-info to refresh the TOC. |
@@ -1219,15 +1207,15 @@ security:
 
 ### 13.1 Language Extensibility
 
-Pro-Context is language-agnostic at the data model level. Language-specific behavior is isolated in registry resolvers.
+Pro-Context is language-agnostic at the data model level. Language is informational metadata on DocSource entries, not a routing or validation concern. Language-specific behavior is isolated in registry resolvers (which handle version resolution via language-specific package registries).
 
 **Current**: Python (PyPI registry)
 **Future**: JavaScript/TypeScript (npm), Rust (crates.io), Go (pkg.go.dev)
 
 Adding a new language requires:
-1. A registry resolver (e.g., `npm-resolver.ts`) that implements version resolution
-2. Known-library entries with the new language
-3. No changes to adapters, cache, search, tools, or config
+1. A registry resolver (e.g., `npm-resolver.ts`) that implements version resolution for the language's package registry
+2. Known-library entries with the new language in their `languages` array
+3. No changes to adapters, cache, search, tools, or config — these layers are language-agnostic by design
 
 ### 13.2 Source Extensibility
 
@@ -1292,7 +1280,7 @@ Future adapter candidates:
 
 ### D8: `get-docs` accepts multiple libraries
 
-**Decision**: `get-docs` takes a `libraries` array instead of a single `libraryId`. Each entry can optionally specify a version and language.
+**Decision**: `get-docs` takes a `libraries` array instead of a single `libraryId`. Each entry can optionally specify a version.
 
 **Rationale**: Developers often work with related libraries simultaneously (e.g., LangChain + Pydantic, FastAPI + SQLAlchemy). When the agent asks "how do I do X", the answer might involve multiple libraries. Accepting an array lets the agent fetch relevant content from several libraries in a single call, with results ranked across all of them. Each library can have its own version pin, so the agent can search LangChain v0.3 and Pydantic v2 in one request.
 
