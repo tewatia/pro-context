@@ -325,15 +325,27 @@ Discovers libraries matching a natural language query. This is a pure discovery 
 ```
 
 **Behavior:**
-1. Fuzzy-match `query` against known library registry
-2. If no match in registry, attempt resolution via PyPI/npm
-3. If still no match, return empty results with fuzzy suggestions
-4. If `language` is provided, filter results to that language
-5. Return all matching libraries ranked by relevance score
+1. Fuzzy-match `query` against curated library registry (in-memory, no network calls)
+2. Apply language filter if provided
+3. Return all matching libraries ranked by relevance score
+4. If no matches found, return empty `results` array
+
+**Registry-only approach**: Pro-Context uses a curated, pre-validated registry of libraries with working documentation. This ensures high-confidence matches and eliminates false positives from JIT discovery. The registry is updated weekly (community) or daily (enterprise).
+
+**If library not in registry**: Users have two options:
+1. **Custom sources config** — Add the library immediately via configuration:
+   ```yaml
+   sources:
+     custom:
+       - name: "my-new-lib"
+         library_id: "author/my-new-lib"
+         type: "url"
+         url: "https://docs.mynewlib.com/llms.txt"
+   ```
+2. **Submit a PR** — Request addition to the curated registry for all users
 
 **Error cases:**
-- No matches found → empty `results` array (not an error — useful signal)
-- Registry timeout → `REGISTRY_TIMEOUT` with retry advice
+- Registry load failure → `INTERNAL_ERROR` (should not happen — registry is bundled with package)
 
 ---
 

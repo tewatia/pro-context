@@ -346,7 +346,9 @@ Input: "langchain-openai"
   → Lowercase: "langchain-openai"
 ```
 
-### 4.2 Resolution Steps
+### 4.2 Resolution Steps (Runtime)
+
+**Runtime resolution searches ONLY the curated registry.** No network calls. No PyPI API. No llms.txt probing. Fast, reliable, offline-capable.
 
 ```
 resolve-library(query: "langchain-openai", language?: "python")
@@ -357,15 +359,11 @@ resolve-library(query: "langchain-openai", language?: "python")
   │    Normalize: strip pip extras, version specs, lowercase
   │    "langchain[openai]>=0.3" → "langchain"
   │
-  ├─ Step 1: Registry lookup
-  │
-  │    1a. Exact package match in registry
-  │        Search packages.pypi across all DocSource entries
-  │        "langchain-openai" found in DocSource "langchain"
-  │        → MATCH: return DocSource "langchain"
-  │
-  │    1b. (The DocSource already contains llmsTxt.url if available —
-  │         the adapter chain uses this at content-fetch time)
+  ├─ Step 1: Exact package match in registry
+  │    Search packages.pypi across all DocSource entries
+  │    "langchain-openai" found in DocSource "langchain"
+  │    → MATCH: return DocSource "langchain"
+  │    (The DocSource already contains llmsTxt.url if available)
   │
   ├─ Step 2: Exact ID match (if step 1 fails)
   │    Search DocSource.id
@@ -375,77 +373,30 @@ resolve-library(query: "langchain-openai", language?: "python")
   │    Search DocSource.aliases
   │    → No match
   │
-  ├─ Step 4: Fuzzy match (if step 3 fails)
-  │    Levenshtein distance against all IDs, names, package names, aliases
-  │    → Might match "langchain" (distance 7 — too far)
-  │    → No useful fuzzy match
-  │
-  ├─ Step 5: PyPI discovery (if step 4 fails)
-  │    GET https://pypi.org/pypi/{name}/json
-  │    → Extract project_urls.Repository (or Source, or Homepage if GitHub URL)
-  │    → Extract project_urls.Documentation → docsUrl
-  │    → Probe for llms.txt using docsUrl-relative patterns:
-  │        1. {docsUrl}/llms.txt           (direct — works for LangChain)
-  │        2. {docsUrl}/en/llms.txt        (locale prefix — works for Anthropic)
-  │        3. {docsUrl}/latest/llms.txt    (version prefix — works for Pydantic)
-  │        4. {domainRoot}/llms.txt        (if docsUrl has a path, try root)
-  │    → Validate each probe (see Section 4.3)
-  │    → Create DocSource with discovered metadata, cache it
-  │
-  └─ Step 6: GitHub discovery (if step 5 fails)
-       If query looks like "owner/repo", try GitHub API
-       GET https://api.github.com/repos/{owner}/{repo}
-       → Extract homepage → docsUrl
-       → Probe for llms.txt using same docsUrl-relative patterns as Step 5
-       → Create DocSource, cache it
+  └─ Step 4: Fuzzy match (if step 3 fails)
+       Levenshtein distance against all IDs, names, package names, aliases
+       Max edit distance: 3
+       Return all matches ranked by relevance score
+       → Might match "langchain" with typo corrections
+       → If no matches within threshold: return empty results
 ```
 
-### 4.3 Content Validation
+**If library not found**: User has two options:
 
-When Steps 5 or 6 discover a potential llms.txt URL (from PyPI docsUrl or GitHub homepage), the content must be validated before accepting it. Many URLs return HTTP 200 but serve HTML error pages.
+1. **Wait for next registry update** (community: weekly, enterprise: daily)
+2. **Add via custom sources config** (immediate):
+   ```yaml
+   sources:
+     custom:
+       - name: "my-new-lib"
+         library_id: "author/my-new-lib"
+         type: "url"
+         url: "https://docs.mynewlib.com/llms.txt"
+   ```
 
-**Validation checks:**
+See Section 5 (Build Script) for how libraries are discovered and added to the registry.
 
-1. **HTTP Status**: HEAD request must return 200.
-2. **Content-Type Header**: Should be `text/plain` or `text/markdown`. If it contains "html", reject.
-3. **Content Check** (first 1KB only): Fetch first 1024 bytes. Reject if it contains HTML indicators (`<!DOCTYPE`, `<html>`, `<head>`, `<body>`).
-4. **Markdown Format**: First line must start with `#` (markdown header).
-
-URL is valid only if all checks pass.
-
-**Hub files at build time**: During registry construction, the build script may encounter hub llms.txt files (e.g., `svelte.dev/llms.txt` linking to `docs/svelte/llms.txt`, `docs/kit/llms.txt`). The build script follows these links, validates each one, and creates a separate DocSource for each valid llms.txt file. The hub itself is not stored — it's a discovery mechanism only. See Section 6.2 for build script details.
-
-### 4.4 Deferred: Speculative URL Pattern Discovery
-
-> **Status**: Deferred to future phase (JS/TS ecosystem support).
->
-> **Important distinction**: The docsUrl-relative probes in Steps 5-6 (trying `/llms.txt`, `/en/llms.txt`, `/latest/llms.txt` on a known docs domain) are NOT deferred — they are needed because llms.txt doesn't always live at the domain root. What IS deferred is the speculative name-based guessing below, which tries to discover the docs domain itself from the library name.
->
-> For libraries not in the registry and not on PyPI, a speculative URL pattern discovery step could try common llms.txt URL patterns based on the library name:
->
-> ```
-> https://docs.{name}.com/llms.txt   (30% of cases in research)
-> https://{name}.dev/llms.txt        (popular with JS frameworks)
-> https://{name}.com/llms.txt        (25% of cases)
-> https://{name}.io/llms.txt         (15% of cases)
-> https://www.{name}.com/llms.txt    (10% of cases)
-> https://docs.{name}.dev/llms.txt   (Pydantic pattern)
-> https://{name}.com/docs/llms.txt   (OpenAI pattern)
-> https://docs.{name}.com/en/llms.txt (Anthropic pattern)
-> https://docs.{name}.io/llms.txt    (Pinecone pattern)
-> https://{name}.readthedocs.io/llms.txt (ReadTheDocs)
-> ```
->
-> With language/version context, additional patterns could be prepended:
-> - `https://{language}.{name}.com/llms.txt` (python.langchain.com)
-> - `https://{name}.com/llms/{language}.txt` (supabase.com/llms/python.txt)
-> - `https://{name}.org/docs/{version}/llms.txt` (nextjs.org/docs/15/llms.txt)
->
-> **Why deferred**: For the Python-focused MVP, PyPI metadata (Step 5) already provides the correct documentation URL for every package that has one. Speculative URL guessing adds 10 HTTP requests for near-zero benefit. This becomes valuable when JS/TS support is added (npm metadata + these patterns would cover frameworks like Angular, Svelte, Vite that use .dev domains).
->
-> Research data: See `docs/research/llms-txt-deployment-patterns.md` for the full survey of 70+ libraries that informed these patterns.
-
-### 4.5 Resolution Priority
+### 4.3 Resolution Priority
 
 | Step | Source | Speed | Coverage | When Used |
 |------|--------|-------|----------|-----------|
@@ -550,10 +501,17 @@ This means:
 ### 5.5 GitHub-Only Libraries
 
 For libraries without a PyPI package:
-- The agent (or user) provides a GitHub URL directly
-- `resolve-library("github.com/some-org/some-lib")` → triggers GitHub discovery (Step 6)
-- The server creates an ephemeral DocSource from the repo metadata
-- Subsequent calls can use the generated `libraryId`
+- Add them manually via custom sources config:
+  ```yaml
+  sources:
+    custom:
+      - name: "some-lib"
+        library_id: "some-org/some-lib"
+        type: "github"
+        url: "https://github.com/some-org/some-lib"
+  ```
+- Or submit a PR to add them to the registry via the manual overrides file
+- The build script can discover llms.txt from GitHub repos just like PyPI packages
 
 ### 5.6 Distribution Variants
 
@@ -619,54 +577,104 @@ The registry is built from multiple sources, combined and deduplicated:
 
 ### 6.2 Build Script
 
-A build script (not part of the runtime server) generates the registry:
+A build script (not part of the runtime server) generates the registry. This is the ONLY place where PyPI API calls, llms.txt probing, and content validation happen.
 
-```
-build-registry.ts
+```python
+# scripts/build_registry.py
 
-1. Fetch top-pypi-packages (top 5,000 by downloads)
+1. Fetch top-pypi-packages (community: top 1,000; enterprise: top 5,000)
+   Source: hugovk/top-pypi-packages monthly snapshot
 
 2. For each package:
    a. GET https://pypi.org/pypi/{name}/json
    b. Extract: name, summary, project_urls
-   c. Determine docsUrl from project_urls.Documentation or project_urls.Homepage
+   c. Determine docsUrl from project_urls.Documentation
    d. Determine repoUrl from project_urls.Source or project_urls.Repository
+   e. Store package metadata for grouping step
 
-3. Group packages by documentation URL:
-   - If two packages share the same docsUrl → same DocSource
-   - Example: langchain, langchain-openai, langchain-core all have
-     Documentation → docs.langchain.com → grouped into one DocSource
+3. Group packages by Repository URL (see section 6.3):
+   Primary signal: same Repository URL → same DocSource
+   Fallback signal: same Homepage URL (if no Repository URL)
+   Example: langchain, langchain-openai, langchain-core all have
+     Repository → github.com/langchain-ai/langchain → grouped into one DocSource
 
-4. For each unique docsUrl, discover llms.txt:
-   a. Try common URL patterns (see section 4.3 for full list):
-      - {docsUrl}/llms.txt
-      - docs.{domain}/llms.txt
-      - {domain}/docs/llms.txt
-      - (+ 7 more patterns)
+4. For each unique DocSource, discover llms.txt:
+   a. Try docsUrl-relative patterns:
+      1. {docsUrl}/llms.txt           (direct — works for LangChain)
+      2. {docsUrl}/en/llms.txt        (locale prefix — works for Anthropic)
+      3. {docsUrl}/latest/llms.txt    (version prefix — works for Pydantic)
+      4. {domainRoot}/llms.txt        (if docsUrl has a path, try root)
 
-   b. For each pattern:
-      - HEAD request to check HTTP 200
-      - GET first 1KB to validate content (reject HTML error pages)
-      - Check starts with markdown header (#)
+   b. For each pattern, validate content (see section 6.2.1 below):
+      - HTTP Status: HEAD request must return 200
+      - Content-Type: Must be text/plain or text/markdown (not HTML)
+      - First 1KB: Must not contain HTML tags (<!DOCTYPE, <html>, etc.)
+      - First line: Must start with # (markdown header)
 
    c. If valid llms.txt found:
-      - Check if it's a hub (links to other llms.txt files)
-      - If hub: follow links, validate each variant, create separate DocSource per valid variant
-      - If not hub: store llmsTxt URL in the DocSource
-      - Determine doc platform (mintlify, vitepress, custom)
+      - Check if it's a hub file (contains links to other llms.txt files)
+      - If hub: follow links, validate each one, create separate DocSource per variant
+      - If regular llms.txt: store URL in DocSource.llmsTxt
+      - Extract platform hint (mintlify, vitepress, custom) from URL structure
 
-   d. If no llms.txt found and no docsUrl:
-      - Check if repoUrl has /docs/ directory
+   d. If no llms.txt found via docsUrl:
+      - If repoUrl exists, try github.com/{owner}/{repo}/docs/ directory
       - Try llms.txt patterns on repoUrl
 
-5. Apply manual overrides:
-   - Package groupings that PyPI metadata can't detect
-   - Aliases for common misspellings
-   - Version URL patterns
-   - docsUrl corrections (some PyPI metadata is wrong/stale)
+5. Apply manual overrides from overrides.yaml:
+   - Force-group packages that automated rule missed
+   - Force-separate packages that were incorrectly grouped
+   - Add aliases for common misspellings/variations
+   - Correct stale/wrong docsUrl from PyPI metadata
+   - Add non-PyPI libraries (GitHub-only, private docs)
 
-6. Output known-libraries.json
+6. Validate and output known-libraries.json:
+   - Deduplicate DocSource IDs
+   - Sort by popularity (download rank)
+   - Validate all URLs are accessible
+   - Generate SHA-256 hash for cache invalidation
 ```
+
+#### 6.2.1 Content Validation (Build-time)
+
+Many URLs return HTTP 200 but serve HTML error pages instead of llms.txt. The build script validates content before accepting a URL:
+
+```python
+async def validate_llms_txt(url: str) -> bool:
+    """Validate that URL serves a real llms.txt file, not an error page"""
+
+    # Step 1: HEAD request
+    response = await http_client.head(url, follow_redirects=True)
+    if response.status_code != 200:
+        return False
+
+    # Step 2: Content-Type check
+    content_type = response.headers.get("Content-Type", "")
+    if "html" in content_type.lower():
+        return False  # Reject HTML responses
+
+    # Step 3: Fetch first 1KB
+    response = await http_client.get(url, headers={"Range": "bytes=0-1023"})
+    content = response.text
+
+    # Step 4: HTML detection
+    html_indicators = ["<!DOCTYPE", "<html", "<head>", "<body>", "<HTML"]
+    if any(indicator in content for indicator in html_indicators):
+        return False
+
+    # Step 5: Markdown header check
+    if not content.strip().startswith("#"):
+        return False
+
+    return True
+```
+
+**Hub detection and resolution**: If the llms.txt file contains multiple links to other llms.txt files (e.g., `https://svelte.dev/docs/svelte/llms.txt`, `https://svelte.dev/docs/kit/llms.txt`), the build script:
+1. Recognizes this as a hub
+2. Follows each link
+3. Validates each linked llms.txt
+4. Creates a separate DocSource for each valid variant
+5. Does NOT store the hub file itself in the registry
 
 ### 6.3 Package Grouping Rule
 
