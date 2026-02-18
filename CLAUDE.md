@@ -31,7 +31,7 @@ All implementation decisions are captured in these six spec documents, which are
 - `docs/specs/02-functional-spec.md` — Problem statement, 5 MCP tools, 2 resources, 3 prompt templates, adapter chain, security model
 - `docs/specs/03-technical-spec.md` — System architecture, data models, two-tier cache, BM25 search, database schema (7 SQLite tables)
 - `docs/specs/04-implementation-guide.md` — Project structure, dependencies, coding conventions, 6 implementation phases (0-5), testing strategy
-- `docs/specs/05-library-resolution.md` — Library name → documentation source mapping, runtime resolution algorithm (4 steps), curated registry approach, repo-based grouping
+- `docs/specs/05-library-resolution.md` — Library name → documentation source mapping, runtime resolution algorithm (6 steps), curated registries as seed data (llms-txt-hub, Awesome-llms-txt), PyPI enrichment, repo-based grouping
 - `docs/specs/06-registry-build-system.md` — Build-time discovery pipeline, PyPI metadata extraction, llms.txt probing (10+ URL patterns), content validation, hub resolution, quality assurance
 
 ### Research Documents
@@ -40,6 +40,7 @@ Additional research documents that inform the specifications:
 
 - `docs/research/llms-txt-deployment-patterns.md` — Comprehensive survey of 70+ libraries showing real-world llms.txt deployment patterns, URL structures, version handling, and multi-variant strategies
 - `docs/research/llms-txt-resolution-strategy.md` — Approved strategy for resolving library names to llms.txt URLs: registry-first approach with smart fallback, hub detection, content validation, and maintenance plan
+- `docs/research/llms-txt-discovery-research.md` — Research on discovering libraries with llms.txt support, including curated registries (llms-txt-hub, Awesome-llms-txt) and Mintlify auto-generation findings
 
 You are allowed to create new documents if you think that the discussion warrants it. Make sure you edit this section to link to any new documents you create.
 

@@ -12,6 +12,7 @@
 - [1. Overview](#1-overview)
 - [2. System Architecture](#2-system-architecture)
 - [3. Discovery Pipeline](#3-discovery-pipeline)
+  - [3.0 Curated Registry Seed Data](#30-curated-registry-seed-data)
   - [3.1 Package Source Discovery](#31-package-source-discovery)
   - [3.2 PyPI Metadata Extraction](#32-pypi-metadata-extraction)
   - [3.3 Documentation URL Discovery](#33-documentation-url-discovery)
@@ -60,6 +61,9 @@ The Registry Build System is a **build-time** process that discovers, validates,
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │                   Discovery Pipeline                      │  │
 │  │                                                           │  │
+│  │  0. Curated Registry Seed Data                            │  │
+│  │     └─ llms-txt-hub, Awesome-llms-txt (100-200 entries) │  │
+│  │                                                           │  │
 │  │  1. Package Source Discovery                              │  │
 │  │     └─ hugovk/top-pypi-packages (monthly snapshot)       │  │
 │  │                                                           │  │
@@ -82,7 +86,7 @@ The Registry Build System is a **build-time** process that discovers, validates,
 │  │     └─ Group by Repository URL                            │  │
 │  │                                                           │  │
 │  │  8. Manual Overrides                                      │  │
-│  │     └─ Apply corrections from manual_overrides.yaml      │  │
+│  │     └─ Apply corrections, merge with curated seed data   │  │
 │  │                                                           │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                                                                  │
@@ -121,6 +125,63 @@ The Registry Build System is a **build-time** process that discovers, validates,
 ---
 
 ## 3. Discovery Pipeline
+
+### 3.0 Curated Registry Seed Data
+
+**Objective**: Bootstrap the registry with validated llms.txt entries from community-maintained sources.
+
+**Data sources**:
+1. **llms-txt-hub** (`github.com/thedaviddias/llms-txt-hub`)
+   - Largest community-maintained directory (100+ entries)
+   - Organized by category: AI/ML, Developer Tools, Data & Analytics, Infrastructure
+   - JSON/YAML format with library name, docs URL, llms.txt URL, description
+   - Regularly updated by community contributors
+
+2. **Awesome-llms-txt** (`github.com/SecretiveShell/Awesome-llms-txt`)
+   - Community-curated index of llms.txt files
+   - Markdown format with links to llms.txt URLs
+   - Supplementary source for additional entries
+
+**Process**:
+```python
+async def fetch_curated_registries() -> list[DocSource]:
+    """Fetch and parse curated registries as seed data"""
+    sources = []
+
+    # Clone/fetch llms-txt-hub
+    hub_url = "https://api.github.com/repos/thedaviddias/llms-txt-hub/contents/data"
+    # Parse registry files, extract entries
+
+    # Clone/fetch Awesome-llms-txt
+    awesome_url = "https://raw.githubusercontent.com/SecretiveShell/Awesome-llms-txt/main/README.md"
+    # Parse markdown, extract llms.txt URLs
+
+    # For each entry:
+    #   1. Validate llms.txt URL (HEAD request + content check)
+    #   2. Extract library metadata
+    #   3. Create DocSource entry
+
+    logger.info(f"Fetched {len(sources)} entries from curated registries")
+    return sources
+```
+
+**Benefits**:
+- **Quick win**: 100-200 validated entries immediately
+- **High quality**: Community-vetted, known-working llms.txt files
+- **AI/ML focus**: Covers major libraries (LangChain, Anthropic, Pydantic AI, OpenAI)
+- **Reduced API calls**: Less PyPI probing needed for popular libraries
+
+**Validation**:
+- Each llms.txt URL must return 200 OK
+- Content must be valid markdown (not HTML)
+- First line must start with `#` (markdown header)
+- File size > 100 bytes (not empty stub)
+
+**Deduplication**:
+- Entries from curated registries take precedence
+- PyPI-discovered entries (section 3.1-3.4) are merged, with curated data winning on conflicts
+
+---
 
 ### 3.1 Package Source Discovery
 
