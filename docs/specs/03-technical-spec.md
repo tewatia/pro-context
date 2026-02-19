@@ -18,10 +18,9 @@
   - [3.2 Cache Types](#32-cache-types)
   - [3.3 Auth Types (HTTP Mode)](#33-auth-types-http-mode)
   - [3.4 Configuration Types](#34-configuration-types)
-- [4. Source Adapter Interface](#4-source-adapter-interface)
-  - [4.1 Interface Definition](#41-interface-definition)
-  - [4.2 Adapter Chain Execution](#42-adapter-chain-execution)
-  - [4.3 Adapter Implementations](#43-adapter-implementations)
+- [4. Documentation Fetcher](#4-documentation-fetcher)
+  - [4.1 Data Types](#41-data-types)
+  - [4.2 Fetcher Implementation](#42-fetcher-implementation)
 - [5. Cache Architecture](#5-cache-architecture)
   - [5.1 Two-Tier Cache Design](#51-two-tier-cache-design)
   - [5.2 Cache Domains](#52-cache-domains)
@@ -102,11 +101,8 @@
 │  │  └────┬─────┘  └────────┬──────────┘   │             │
 │  │       │                  │              │             │
 │  │  ┌────▼──────────────────▼──────────┐   │             │
-│  │  │       Source Adapters            │   │             │
-│  │  │  ┌────────┐ ┌───────┐ ┌───────┐ │   │             │
-│  │  │  │llms.txt│ │GitHub │ │Custom │ │   │             │
-│  │  │  │Adapter │ │Adapter│ │Adapter│ │   │             │
-│  │  │  └────────┘ └───────┘ └───────┘ │   │             │
+│  │  │      llms.txt Fetcher           │   │             │
+│  │  │   (HTTP GET + parse llms.txt)   │   │             │
 │  │  └──────────────────────────────────┘   │             │
 │  │                                         │             │
 │  │  ┌──────────────────────────────────┐   │             │
@@ -145,7 +141,7 @@ MCP Client
   │    │
   │    ├─ 1. Look up libraryId in registry (exact match)
   │    ├─ 2. If not found → return LIBRARY_NOT_FOUND error
-  │    ├─ 3. Fetch TOC via adapter chain (llms.txt → GitHub → Custom)
+  │    ├─ 3. Fetch TOC from library.llmsTxtUrl via fetcher
   │    ├─ 4. Extract availableSections from TOC
   │    ├─ 5. Apply sections filter if specified
   │    ├─ 6. Cache TOC, add to session resolved list
@@ -158,7 +154,7 @@ MCP Client
   │    │    ├─ HIT (fresh) → use cached content
   │    │    ├─ HIT (stale) → use cached + trigger background refresh
   │    │    └─ MISS → continue to step 3
-  │    ├─ 3. Adapter chain: llms.txt → GitHub → Custom
+  │    ├─ 3. Fetch content from llmsTxtUrl via fetcher
   │    ├─ 4. Chunk raw content into sections
   │    ├─ 5. Rank chunks across all libraries by topic relevance (BM25)
   │    ├─ 6. Select top chunk(s) within maxTokens budget
@@ -339,7 +335,6 @@ class PageResult:
 class ErrorCode(str, Enum):
     """Error codes for ProContextError"""
     LIBRARY_NOT_FOUND = "LIBRARY_NOT_FOUND"
-    LLMS_TXT_NOT_AVAILABLE = "LLMS_TXT_NOT_AVAILABLE"  # Library in registry but no llms.txt
     TOPIC_NOT_FOUND = "TOPIC_NOT_FOUND"
     PAGE_NOT_FOUND = "PAGE_NOT_FOUND"
     URL_NOT_ALLOWED = "URL_NOT_ALLOWED"
@@ -354,15 +349,29 @@ class ErrorCode(str, Enum):
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
-@dataclass
 class ProContextError(Exception):
-    """Structured error with recovery information"""
-    code: ErrorCode  # Machine-readable error code
-    message: str  # Human-readable error description
-    recoverable: bool  # Whether error can be resolved by retrying or changing input
-    suggestion: str  # Actionable suggestion for the user/agent
-    retry_after: int | None = None  # Seconds to wait before retrying (if applicable)
-    details: dict | None = None  # Additional context (URLs, library names, etc.)
+    """Structured error with recovery information.
+
+    Not a dataclass — dataclass + Exception has non-obvious behaviour in Python
+    (dataclass __init__ conflicts with Exception.args). Use explicit __init__ instead.
+    """
+
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        recoverable: bool,
+        suggestion: str,
+        retry_after: int | None = None,
+        details: dict | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.recoverable = recoverable
+        self.suggestion = suggestion
+        self.retry_after = retry_after
+        self.details = details
 ```
 
 ### 3.2 Cache Types
@@ -379,7 +388,6 @@ class CacheEntry:
     content_hash: str  # Content SHA-256 hash (for freshness checking)
     fetched_at: datetime  # When this entry was created
     expires_at: datetime  # When this entry expires
-    adapter: str  # Name of the adapter that produced this content
 
 
 @dataclass
@@ -509,215 +517,156 @@ class ProContextConfig:
 
 ---
 
-## 4. Source Adapter Interface
+## 4. Documentation Fetcher
 
-### 4.1 Interface Definition
+**Architectural shift**: All documentation sources are normalized to llms.txt format by the builder system (see `docs/builder/` for details). The MCP server is a simple fetch-parse-cache layer with no source-specific logic.
+
+### 4.1 Data Types
 
 ```python
-from abc import ABC, abstractmethod
-from typing import Protocol
-
 @dataclass
 class RawPageContent:
-    """Raw page content fetched by adapters"""
+    """Raw page content fetched from llms.txt sources"""
     content: str  # Page content in markdown
     title: str  # Page title (extracted from first heading or URL)
     source_url: str  # Canonical source URL
     content_hash: str  # Content SHA-256 hash
     etag: str | None = None  # ETag header value (if available)
     last_modified: str | None = None  # Last-Modified header (if available)
-
-
-class SourceAdapter(ABC):
-    """Abstract base class for documentation source adapters"""
-
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Unique adapter name (e.g., "llms-txt", "github", "custom")"""
-        pass
-
-    @property
-    @abstractmethod
-    def priority(self) -> int:
-        """Priority order (lower = higher priority)"""
-        pass
-
-    @abstractmethod
-    async def can_handle(self, library: Library) -> bool:
-        """
-        Check if this adapter can serve documentation for the given library.
-        Should be cheap (no network requests if possible).
-        """
-        pass
-
-    @abstractmethod
-    async def fetch_toc(self, library: Library) -> list[TocEntry] | None:
-        """
-        Fetch the table of contents for the given library.
-        Returns structured TOC entries parsed from llms.txt, GitHub /docs/, etc.
-        Always fetches the latest available documentation.
-        """
-        pass
-
-    @abstractmethod
-    async def fetch_page(self, url: str) -> RawPageContent | None:
-        """
-        Fetch a single documentation page and return markdown content.
-        Used by read-page and internally by get-docs for JIT content fetching.
-        """
-        pass
-
-    @abstractmethod
-    async def check_freshness(self, library: Library, cached: CacheEntry) -> bool:
-        """
-        Check if the cached version is still fresh.
-        Uses SHA comparison, ETags, or Last-Modified headers.
-        Returns True if cache is still valid (no refetch needed).
-        """
-        pass
 ```
 
-### 4.2 Adapter Chain Execution
+### 4.2 Fetcher Implementation
 
 ```python
-class AdapterChain:
-    """Orchestrates fallback across multiple adapters"""
+class LlmsTxtFetcher:
+    """Simple HTTP fetcher for llms.txt files"""
 
-    def __init__(self, adapters: list[SourceAdapter]):
-        # Sort by priority (lower = higher priority)
-        self.adapters = sorted(adapters, key=lambda a: a.priority)
+    def __init__(self, http_client: httpx.AsyncClient, timeout: int = 30):
+        self.client = http_client
+        self.timeout = timeout
 
     async def fetch_toc(self, library: Library) -> list[TocEntry]:
-        """Fetch TOC via adapter chain with fallback"""
-        errors: list[Exception] = []
+        """Fetch TOC from llms.txt URL (guaranteed by builder)"""
+        llms_txt_url = library.llmsTxtUrl
 
-        for adapter in self.adapters:
-            if not await adapter.can_handle(library):
-                continue
+        try:
+            response = await self.client.get(
+                llms_txt_url,
+                timeout=self.timeout,
+                follow_redirects=True
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise ProContextError(
+                    code=ErrorCode.LLMS_TXT_NOT_FOUND,
+                    message=f"llms.txt not found at {llms_txt_url}",
+                    recoverable=False
+                )
+            raise ProContextError(
+                code=ErrorCode.NETWORK_FETCH_FAILED,
+                message=f"Failed to fetch llms.txt: {e}",
+                recoverable=True
+            )
+        except httpx.RequestError as e:
+            raise ProContextError(
+                code=ErrorCode.NETWORK_FETCH_FAILED,
+                message=f"Network error fetching llms.txt: {e}",
+                recoverable=True
+            )
 
-            try:
-                result = await adapter.fetch_toc(library)
-                if result is not None:
-                    return result
-            except Exception as e:
-                errors.append(e)
-
-        raise AllAdaptersFailedError(errors)
+        # Parse llms.txt markdown format
+        return self._parse_llms_txt(response.text, llms_txt_url)
 
     async def fetch_page(self, url: str) -> RawPageContent:
-        """Fetch page via adapter chain with fallback"""
-        errors: list[Exception] = []
+        """Fetch a single documentation page"""
+        try:
+            response = await self.client.get(
+                url,
+                timeout=self.timeout,
+                follow_redirects=True
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise ProContextError(
+                    code=ErrorCode.PAGE_NOT_FOUND,
+                    message=f"Page not found: {url}",
+                    recoverable=False
+                )
+            raise ProContextError(
+                code=ErrorCode.NETWORK_FETCH_FAILED,
+                message=f"Failed to fetch page: {e}",
+                recoverable=True
+            )
+        except httpx.RequestError as e:
+            raise ProContextError(
+                code=ErrorCode.NETWORK_FETCH_FAILED,
+                message=f"Network error fetching page: {e}",
+                recoverable=True
+            )
 
-        for adapter in self.adapters:
-            try:
-                result = await adapter.fetch_page(url)
-                if result is not None:
-                    return result
-            except Exception as e:
-                errors.append(e)
+        content = response.text
+        title = self._extract_title(content)
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
 
-        raise AllAdaptersFailedError(errors)
+        return RawPageContent(
+            content=content,
+            title=title,
+            source_url=url,
+            content_hash=content_hash,
+            etag=response.headers.get("etag"),
+            last_modified=response.headers.get("last-modified")
+        )
 
+    async def check_freshness(self, url: str, cached_hash: str) -> bool:
+        """Check if cached content is still fresh using HEAD request"""
+        try:
+            response = await self.client.head(url, timeout=self.timeout)
+            response.raise_for_status()
 
-class AllAdaptersFailedError(Exception):
-    """Raised when all adapters fail to fetch content"""
+            # If ETag available, compare with cached
+            etag = response.headers.get("etag")
+            if etag:
+                # ETag comparison requires storing ETag in cache
+                # For now, we'll refetch and compare content hash
+                pass
 
-    def __init__(self, errors: list[Exception]):
-        self.errors = errors
-        super().__init__(f"All adapters failed: {len(errors)} errors")
+            # Last-Modified comparison
+            last_modified = response.headers.get("last-modified")
+            if last_modified:
+                # Parse and compare timestamps
+                pass
+
+            # Fallback: Refetch and compare content hash
+            full_response = await self.client.get(url, timeout=self.timeout)
+            full_response.raise_for_status()
+            new_hash = hashlib.sha256(full_response.text.encode()).hexdigest()
+            return new_hash == cached_hash
+
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            # On error, assume cache is stale (safer to refetch)
+            return False
+
+    def _parse_llms_txt(self, content: str, base_url: str) -> list[TocEntry]:
+        """Parse llms.txt markdown format into TOC entries"""
+        # Extract ## headings as sections, list items as entries
+        # For each entry: extract title, URL, description
+        # Return structured TocEntry[]
+        pass  # Implementation details in Phase 2
+
+    def _extract_title(self, markdown: str) -> str:
+        """Extract title from first heading in markdown"""
+        # Look for first # heading
+        pass  # Implementation details in Phase 2
 ```
 
-### 4.3 Adapter Implementations
-
-#### llms.txt Adapter
-
-```
-canHandle(library):
-  1. Check if library.docsUrl is set
-  2. Return true if docsUrl is not null
-
-fetchToc(library):
-  1. Fetch {library.docsUrl}/llms.txt
-  2. If 404, return null
-  3. Parse markdown: extract ## headings as sections, list items as entries
-  4. For each entry: extract title, URL, description
-  5. Return TocEntry[]
-
-fetchPage(url):
-  1. Try {url}.md first (Mintlify pattern — returns clean markdown)
-  2. If .md fails, fetch the URL directly
-  3. If HTML response, convert to markdown (strip nav, headers, footers)
-  4. Extract title from first heading
-  5. Return { content, title, sourceUrl, contentHash }
-
-checkFreshness(library, cached):
-  1. HEAD request to source URL
-  2. Compare ETag or Last-Modified headers
-  3. If no headers available, compare content SHA
-  4. Return true if cache is still valid
-```
-
-**Implementation scope:**
-- **Phase 1-3**: Only llms.txt adapter implemented (see doc 04 for implementation priorities)
-- **Phase 4+**: GitHub and Custom adapters added for broader source support
-
----
-
-#### GitHub Adapter (Phase 4+)
-
-**Status**: Design complete, implementation deferred to Phase 4+
-
-```
-canHandle(library):
-  1. Check if library.repoUrl is set and is a GitHub URL
-  2. Return true if valid GitHub repo
-
-fetchToc(library):
-  1. Fetch /docs/ directory listing from repo (default branch)
-  3. If /docs/ exists → create TocEntry per file, using directories as sections
-  4. If no /docs/ → parse README.md headings as TOC entries
-  5. Generate GitHub raw URLs for each entry
-  6. Return TocEntry[]
-
-fetchPage(url):
-  1. Fetch the raw file from GitHub (default branch)
-  2. Return as markdown { content, title, sourceUrl, contentHash }
-
-checkFreshness(library, cached):
-  1. GET latest commit SHA from GitHub API
-  2. Compare against cached SHA
-  3. Return true if SHA matches (content unchanged)
-```
-
-#### Custom Adapter (Phase 4+)
-
-**Status**: Design complete, implementation deferred to Phase 4+
-
-```
-canHandle(library):
-  1. Check if library.id matches any custom source config
-  2. Return true if match found
-
-fetchToc(library):
-  1. Determine source type (url, file, github)
-  2. For "url": fetch URL, parse as llms.txt format
-  3. For "file": read local file, parse as llms.txt format
-  4. For "github": delegate to GitHub adapter logic
-  5. Return TocEntry[]
-
-fetchPage(url):
-  1. Determine source type from URL/path
-  2. For "url": fetch URL content
-  3. For "file": read local file
-  4. Return { content, title, sourceUrl, contentHash }
-
-checkFreshness(library, cached):
-  1. For "url": HEAD request + ETag/Last-Modified
-  2. For "file": Check file modification time
-  3. For "github": Compare commit SHA
-  4. Return true if cache is still valid
-```
+**Key simplifications from adapter architecture:**
+- No adapter chain, no fallback logic, no priority ordering
+- Every library in registry has a valid `llmsTxtUrl` (guaranteed by builder)
+- Builder handles source-specific complexity at build time
+- MCP server only deals with HTTP GET + parse llms.txt format
+- Error handling is simple: HTTP errors → ProContextError
 
 ---
 
@@ -726,7 +675,7 @@ checkFreshness(library, cached):
 ### 5.1 Two-Tier Cache Design
 
 ```
-Query → Memory LRU (Tier 1) → SQLite (Tier 2) → Source Adapters
+Query → Memory LRU (Tier 1) → SQLite (Tier 2) → llms.txt Fetcher
          │                      │                   │
          ▼                      ▼                   ▼
       <1ms latency           <10ms latency       100ms-3s latency
@@ -862,9 +811,13 @@ Page key: SHA-256("page:" + url)
 | Signal | Trigger | Action |
 |--------|---------|--------|
 | TTL expiry | Automatic | Entry marked stale; served with `stale: true` |
-| SHA mismatch | `checkFreshness()` on read | Refetch from source, update cache |
+| SHA mismatch | Background refresh (step 2b) | Update cache entry with new content |
+| ETag / Last-Modified mismatch | `check_freshness()` called during background refresh | Triggers full content re-fetch |
+| Registry URL change | Registry update diff | All affected entries marked `stale = 1` |
 | Manual invalidation | Admin CLI command | Delete entry from both tiers |
 | Cleanup job | Scheduled (configurable interval) | Delete all expired entries from SQLite |
+
+**`check_freshness()` call point**: During background refresh (step 2 below), the fetcher's `check_freshness()` is called first as a cheap HEAD request. If it returns `True` (cache still valid), only the `expires_at` timestamp is extended — no re-fetch needed. If it returns `False` or is unavailable, the full content is re-fetched and the SHA is compared.
 
 ### 5.7 Background Refresh
 
@@ -873,10 +826,13 @@ When a stale cache entry is served, a background refresh is triggered:
 ```
 1. Return stale content immediately (with stale: true)
 2. Spawn background task:
-   a. Fetch fresh content from adapter chain
-   b. Compare content hash with cached
-   c. If changed → update cache entry
-   d. If unchanged → update expiresAt timestamp only
+   a. Call fetcher.check_freshness(url, cached_hash)
+      - Returns True (content hash matches) → extend expiresAt, done
+      - Returns False or error → proceed to re-fetch
+   b. Fetch fresh content from llmsTxtUrl via fetcher
+   c. Compare content hash (SHA-256) with cached content_hash
+   d. If changed → update cache entry with new content and hash
+   e. If unchanged → update expiresAt timestamp only
 ```
 
 **Handling refresh failures:**
@@ -1097,11 +1053,25 @@ When returning results via `get-docs`, the system applies a token budget:
 
 ### 8.1 Target Metrics
 
+**Token metrics:**
+
 | Metric | Target | Benchmark |
 |--------|--------|-----------|
 | Avg tokens per response (get-docs) | <3,000 | Deepcon: 2,365 |
 | Accuracy | >85% | Deepcon: 90% |
 | Tokens per correct answer | <3,529 | Deepcon: 2,628 |
+
+**Latency SLOs (P95, measured from tool call to first byte of response):**
+
+| Tool | Cache hit | Cache miss (cold fetch) |
+|------|-----------|------------------------|
+| `resolve-library` | <10ms (registry in memory) | <200ms (PyPI API fallback) |
+| `get-library-info` | <50ms (TOC from memory/SQLite) | <3s (fetcher HTTP) |
+| `get-docs` | <100ms (chunks from SQLite + BM25) | <5s (fetch + chunk + index) |
+| `search-docs` | <200ms (BM25 query across index) | N/A (requires prior indexing) |
+| `read-page` | <50ms (page from memory/SQLite) | <3s (fetcher HTTP) |
+
+These are the pass/fail criteria for integration and performance tests. Cold fetch latency depends on network conditions and documentation site response time; 3–5s represents a reasonable P95 for well-behaved external sources.
 
 ### 8.2 Techniques
 
@@ -1216,9 +1186,9 @@ uvicorn.run(app, host=config.server.host, port=config.server.port)
 ### 10.1 Key Generation
 
 ```
-1. Generate 32 random bytes using crypto.randomBytes()
+1. Generate 32 random bytes using secrets.token_bytes(32)
 2. Encode as base64url → this is the API key (43 chars)
-3. Compute SHA-256 hash of the key
+3. Compute SHA-256 hash of the key using hashlib.sha256()
 4. Store only the hash + prefix (first 8 chars) in SQLite
 5. Return the full key to the admin (shown once, never stored)
 ```
@@ -1295,6 +1265,22 @@ API keys can have custom rate limits:
 -- NULL means use default from config
 SELECT rate_limit_per_minute FROM api_keys WHERE key_hash = ?;
 ```
+
+### 11.4 Outbound Fetcher Rate Limiting
+
+Inbound rate limiting (Sections 11.1–11.3) protects the server. Outbound rate limiting protects the documentation sources from being hammered.
+
+**Per-domain concurrency cap**: The `httpx` client is configured with a connection pool limit per host (default: 5 concurrent connections). This prevents a burst of inbound requests from spawning an equal burst of outbound fetches to a single documentation site.
+
+**Default limits:**
+
+| Domain | Max concurrent connections | Notes |
+|--------|---------------------------|-------|
+| `api.github.com` | 2 | GitHub API rate limit: 60 req/hr unauthenticated, 5,000 req/hr authenticated |
+| `raw.githubusercontent.com` | 5 | Raw file fetches, no rate limit but be polite |
+| `*.readthedocs.io`, `*.github.io`, other doc sites | 5 | Per-host cap via httpx pool |
+
+**GitHub API token**: If `sources.github.token` is configured, it is sent as a `Authorization: Bearer` header on all `api.github.com` requests, raising the rate limit to 5,000 req/hr.
 
 ---
 
@@ -1386,6 +1372,8 @@ def is_allowed_url(url: str, allowlist: list[str]) -> bool:
 - Custom sources in config are added to the allowlist
 - **Dynamic expansion**: When an llms.txt file is fetched, all URLs in it are added to the session allowlist
 
+**Redirect validation**: `httpx` must be configured with `follow_redirects=False`. Redirects are handled manually: the redirect target URL is passed through `is_allowed_url()` before following. A redirect to a private IP or non-allowlisted domain is rejected with `URL_NOT_ALLOWED`, even if the original URL passed the check. Maximum redirect depth: 3.
+
 ### 12.3 Secret Redaction
 
 structlog logger is configured with processor pipelines for secret redaction:
@@ -1426,7 +1414,7 @@ structlog.configure(
 Documentation content is treated as untrusted text:
 
 - No `eval()` or dynamic `import()` of documentation content
-- HTML content is sanitized before markdown conversion (future HTML adapter)
+- All content is fetched as plain text markdown (llms.txt format)
 - No execution of code examples
 - Content stored in SQLite uses parameterized queries (no SQL injection)
 
@@ -1449,7 +1437,6 @@ Every request produces a structured log entry:
   "cacheHit": true,
   "cacheTier": "memory",
   "stale": false,
-  "adapter": null,
   "duration": 3,
   "tokenCount": 1250,
   "status": "success"
@@ -1462,7 +1449,7 @@ Every request produces a structured log entry:
 |--------|-------------|-------------|
 | Cache hit rate | % of requests served from cache | health resource |
 | Cache tier distribution | memory vs SQLite vs miss | health resource |
-| Adapter success rate | % of successful fetches per adapter | health resource |
+| Fetcher success rate | % of successful HTTP fetches | health resource |
 | Average latency | Per-tool response time | logs |
 | Avg tokens per response | Token efficiency tracking | logs |
 | Error rate | % of requests returning errors | health resource |
@@ -1477,18 +1464,20 @@ The `pro-context://health` resource returns:
   "status": "healthy | degraded | unhealthy",
   "uptime": 3600,
   "cache": { "memoryEntries": 142, "memoryBytes": 52428800, "sqliteEntries": 1024, "hitRate": 0.87 },
-  "adapters": {
-    "llms-txt": { "status": "available", "lastSuccess": "...", "errorCount": 0 },
-    "github": { "status": "available", "rateLimitRemaining": 4850 }
+  "fetcher": {
+    "status": "available",
+    "lastSuccess": "2026-02-20T10:30:00Z",
+    "errorCount": 0,
+    "successRate": 0.98
   },
   "version": "1.0.0"
 }
 ```
 
 Status determination:
-- `healthy`: All adapters available, cache functional
-- `degraded`: Some adapters unavailable, or cache hit rate < 50%
-- `unhealthy`: All adapters unavailable, or cache corrupted
+- `healthy`: Fetcher working, cache functional, hit rate > 80%
+- `degraded`: Fetcher experiencing errors, or cache hit rate < 50%
+- `unhealthy`: Fetcher completely failing, or cache corrupted
 
 ---
 
@@ -1505,7 +1494,6 @@ CREATE TABLE IF NOT EXISTS doc_cache (
   content TEXT NOT NULL,
   source_url TEXT NOT NULL,
   content_hash TEXT NOT NULL,
-  adapter TEXT NOT NULL,
   fetched_at TEXT NOT NULL,       -- ISO 8601
   expires_at TEXT NOT NULL,       -- ISO 8601
   stale INTEGER NOT NULL DEFAULT 0, -- 1 if registry URL changed, requires background refresh
@@ -1572,6 +1560,25 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
   tokenize='porter unicode61'
 );
 
+-- FTS5 sync triggers (required for external content mode)
+-- Without these, search_fts index will NOT update when search_chunks changes.
+CREATE TRIGGER IF NOT EXISTS search_chunks_ai AFTER INSERT ON search_chunks BEGIN
+  INSERT INTO search_fts(rowid, title, content, section_path)
+  VALUES (new.rowid, new.title, new.content, new.section_path);
+END;
+
+CREATE TRIGGER IF NOT EXISTS search_chunks_ad AFTER DELETE ON search_chunks BEGIN
+  INSERT INTO search_fts(search_fts, rowid, title, content, section_path)
+  VALUES ('delete', old.rowid, old.title, old.content, old.section_path);
+END;
+
+CREATE TRIGGER IF NOT EXISTS search_chunks_au AFTER UPDATE ON search_chunks BEGIN
+  INSERT INTO search_fts(search_fts, rowid, title, content, section_path)
+  VALUES ('delete', old.rowid, old.title, old.content, old.section_path);
+  INSERT INTO search_fts(rowid, title, content, section_path)
+  VALUES (new.rowid, new.title, new.content, new.section_path);
+END;
+
 -- API keys (HTTP mode only)
 CREATE TABLE IF NOT EXISTS api_keys (
   id TEXT PRIMARY KEY,
@@ -1588,6 +1595,12 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 
 -- Library metadata cache
+-- Purpose: stores enriched metadata fetched from PyPI/npm at runtime for libraries
+-- that were resolved via the PyPI fallback path (i.e., NOT in known-libraries.json).
+-- The in-memory registry (known-libraries.json) only covers curated libraries.
+-- When resolve-library falls through to PyPI, the fetched metadata is cached here
+-- to avoid repeated PyPI API calls for the same library within the TTL window.
+-- Libraries in known-libraries.json do NOT need entries here.
 CREATE TABLE IF NOT EXISTS library_metadata (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -1603,6 +1616,13 @@ CREATE TABLE IF NOT EXISTS library_metadata (
 CREATE INDEX IF NOT EXISTS idx_library_metadata_package ON library_metadata(package_name);
 
 -- Session state (resolved libraries in current session)
+-- Session = one MCP client connection lifetime.
+-- stdio mode: table is cleared on server startup (each process is one session).
+-- HTTP mode: table is cleared per SSE connection (scoped to the connection context).
+-- Purpose: allows tools to know which libraries have already been resolved in this
+--   session without the agent having to re-call resolve-library.
+-- Cleared by: DELETE FROM session_libraries at process start (stdio) or
+--   on SSE connection teardown (HTTP mode).
 CREATE TABLE IF NOT EXISTS session_libraries (
   library_id TEXT NOT NULL PRIMARY KEY,
   name TEXT NOT NULL,
@@ -1682,8 +1702,14 @@ def find_closest_matches(query: str, candidates: list[Library]) -> list[LibraryM
         id_dist = fuzz.distance(normalized, normalized_id)
         best_dist = min(name_dist, id_dist)
 
-        if best_dist <= 3:  # Max edit distance: 3
-            relevance = 1 - (best_dist / max(len(normalized), 1))
+        # Threshold scales with query length: allow up to 20% edit distance,
+        # minimum threshold of 1 (for very short queries), maximum of 4.
+        # Avoids negative relevance and false positives on short strings.
+        max_allowed = max(1, min(4, len(normalized) // 5))
+        if best_dist <= max_allowed:
+            # Normalise against the longer of the two strings to keep score in [0, 1]
+            max_len = max(len(normalized), len(normalized_name), len(normalized_id), 1)
+            relevance = 1.0 - (best_dist / max_len)
             results.append(
                 LibraryMatch(
                     library_id=candidate.id,

@@ -794,13 +794,13 @@ These questions should be addressed in subsequent design and specification docum
 
 2. **What's the realistic accuracy of BM25-only search for documentation queries?** BM25 excels at keyword queries ("ChatOpenAI parameters") but struggles with conceptual queries ("how do I implement retry logic"). If BM25-only gets us to ~70% accuracy, is that acceptable as a baseline while agent navigation handles the rest?
 
-3. **What percentage of the target Python library set has usable llms.txt?** This directly determines how often we can use the llms.txt adapter vs falling back to GitHub.
+3. **What percentage of the target Python library set has usable llms.txt?** _(Resolved: Builder system normalizes all sources to llms.txt format at build time, achieving 100% coverage)_
 
 4. **How many tool calls does agent navigation typically require?** mcpdoc's approach might need 3-5 calls to answer a question. Is this acceptable to users, or does it feel too slow?
 
 5. **Should we provide the agent with a table-of-contents resource?** Instead of making the agent call `fetch_docs` on the llms.txt URL (which costs a tool call), should the TOC be available as an MCP resource that's automatically attached to the conversation?
 
-6. **How should we handle libraries without llms.txt?** GitHub README + /docs/ folder? Auto-generated llms.txt from scraped HTML? This is the fallback strategy question.
+6. **How should we handle libraries without llms.txt?** _(Resolved: Builder system generates llms.txt from GitHub README/docs at build time. See `docs/builder/` for normalization strategy)_
 
 ---
 

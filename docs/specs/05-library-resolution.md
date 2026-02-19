@@ -131,13 +131,11 @@ A Documentation Source entry contains the following fields:
 
 **llms.txt Support:**
 
-- `llmsTxtAvailable` (boolean, required): Whether llms.txt is available for this library
-  - `true`: Library has validated llms.txt file (llmsTxt object present)
-  - `false`: Library is tracked but no llms.txt available (Phase 1-3: returns LLMS_TXT_NOT_AVAILABLE error)
-- `llmsTxt` (object, optional): Present only if `llmsTxtAvailable` is `true`
-  - `url` (string, required): llms.txt URL (validated)
-  - `platform` (string, optional): Documentation platform (mintlify, vitepress, custom, etc.)
-  - `lastValidated` (string, required): Last validation timestamp (ISO format)
+- `llmsTxtUrl` (string, required): URL to llms.txt file
+  - **Builder guarantee**: Every entry in the registry has a valid llms.txt URL
+  - **Sources**: Native llms.txt (library-published) or generated llms.txt (builder-created from GitHub)
+  - **Hosting**: Native files served from original domains, generated files served from GitHub Pages
+  - **Note**: Metadata like platform and validation timestamp are tracked by builder but not included in runtime registry (simplifies MCP server)
 
 ### 3.2 llms.txt Support
 
@@ -192,12 +190,7 @@ A Documentation Source entry contains the following fields:
       ]
     },
     "aliases": ["lang-chain", "lang chain"],
-    "llmsTxtAvailable": true,
-    "llmsTxt": {
-      "url": "https://python.langchain.com/llms.txt",
-      "platform": "mintlify",
-      "lastValidated": "2026-02-20"
-    }
+    "llmsTxtUrl": "https://python.langchain.com/llms.txt"
   },
   {
     "id": "requests",
@@ -209,7 +202,7 @@ A Documentation Source entry contains the following fields:
       "pypi": ["requests"]
     },
     "aliases": [],
-    "llmsTxtAvailable": false
+    "llmsTxtUrl": "https://pro-context.github.io/llms-txt/requests.txt"
   },
   {
     "id": "pydantic",
@@ -226,7 +219,7 @@ A Documentation Source entry contains the following fields:
       ]
     },
     "aliases": [],
-    "llmsTxtAvailable": true,
+    "llmsTxtUrl": "https://docs.pydantic.dev/latest/llms.txt"
     "llmsTxt": {
       "url": "https://docs.pydantic.dev/latest/llms.txt",
       "platform": "custom",
@@ -386,7 +379,7 @@ resolve-library(query: "langchain-openai", language?: "python")
   │    Search packages.pypi across all DocSource entries
   │    "langchain-openai" found in DocSource "langchain"
   │    → MATCH: return DocSource "langchain"
-  │    (The DocSource already contains llmsTxt.url if available)
+  │    (The DocSource already contains llmsTxtUrl)
   │
   ├─ Step 2: Exact ID match (if step 1 fails)
   │    Search DocSource.id
@@ -839,7 +832,7 @@ At startup, the server loads `known-libraries.json` into memory and builds three
 
 - Look up normalized query in package-to-ID index
 - If found, retrieve DocSource by ID
-- Return DocSource with all metadata (including llmsTxt.url if available)
+- Return DocSource with all metadata (including llmsTxtUrl)
 - If not found, continue to Step 2
 
 **Step 2: Exact ID match**
@@ -921,9 +914,9 @@ An agent might call `resolve-library` with each line from a requirements.txt. So
 
 ### Q3: Should llms.txt take absolute priority over docsUrl?
 
-If a DocSource has both `docsUrl` and `llmsTxt.url`, should llms.txt always be used first, or should we fall back to GitHub/HTML scraping if llms.txt content seems incomplete?
+If a DocSource has both `docsUrl` and `llmsTxtUrl`, should llms.txt always be used first, or should we fall back to GitHub/HTML scraping if llms.txt content seems incomplete?
 
-**Lean**: llms.txt takes absolute priority. If a library publishes llms.txt, they're explicitly supporting AI agents. Trust their curation. If content is incomplete, that's the library maintainer's problem to fix, not ours to work around.
+**Lean**: llms.txt takes absolute priority. Builder guarantees every entry has a valid llmsTxtUrl (either native or generated). MCP server doesn't need fallback logic—all documentation is pre-normalized by builder. If content is incomplete, that's a builder issue to fix in the next weekly build, not a runtime concern.
 
 ### Q4: How do we handle llms.txt URL migrations?
 

@@ -13,7 +13,6 @@
 - [2. Target Users](#2-target-users)
   - [2.1 Individual Developer](#21-individual-developer)
   - [2.2 Development Team](#22-development-team)
-  - [2.3 Enterprise (Future)](#23-enterprise-future)
 - [3. Core Concepts](#3-core-concepts)
   - [3.1 Two Retrieval Paths](#31-two-retrieval-paths)
   - [3.2 Documentation Sources](#32-documentation-sources)
@@ -42,9 +41,9 @@
   - [7.1 migrate-code](#71-migrate-code)
   - [7.2 debug-with-docs](#72-debug-with-docs)
   - [7.3 explain-api](#73-explain-api)
-- [8. Documentation Source Adapter Chain](#8-documentation-source-adapter-chain)
-  - [8.1 Priority Order](#81-priority-order)
-  - [8.2 Adapter Contract](#82-adapter-contract)
+- [8. Documentation Fetching](#8-documentation-fetching)
+  - [8.1 Fetching Flow](#81-fetching-flow)
+  - [8.2 Custom Documentation Sources](#82-custom-documentation-sources)
   - [8.3 Custom Sources](#83-custom-sources)
 - [9. Security](#9-security)
   - [9.1 URL Allowlist (SSRF Prevention)](#91-url-allowlist-ssrf-prevention)
@@ -106,13 +105,6 @@ The competitive analysis (01-competitive-analysis.md) identified two core findin
 - Needs API key authentication and usage tracking
 - May have internal/private library documentation
 
-### 2.3 Enterprise (Future)
-
-- Large organization with custom documentation sources
-- Requires audit logging and access controls
-- Deploys via Docker in private infrastructure
-- Needs custom source adapters for internal docs
-
 ---
 
 ## 3. Core Concepts
@@ -151,17 +143,18 @@ Both paths share the same cache and source infrastructure.
 
 ### 3.2 Documentation Sources
 
-Documentation is fetched from authoritative sources in priority order:
+**All documentation is served as llms.txt format.** The builder system (see `docs/builder/`) normalizes all sources at build time:
 
-| Priority | Source | Content Type | Coverage |
-|----------|--------|-------------|----------|
-| 1 | **llms.txt** | LLM-optimized markdown, authored by library maintainers | Growing: 500+ sites, accelerating via Mintlify (10K+ companies) and Fern |
-| 2 | **GitHub** | Raw markdown from /docs/, README.md | Near-universal for open-source libraries |
-| 3 | **Custom** | User-configured URLs, local files | Enterprise/internal docs |
+| Original Source     | Builder Processing                               | Runtime                                   |
+| ------------------- | ------------------------------------------------ | ----------------------------------------- |
+| **Native llms.txt** | Validated and indexed as-is                      | Fetched directly from source              |
+| **GitHub docs/**    | Converted to llms.txt format (TOC + markdown)    | Fetched from builder-generated llms.txt   |
+| **GitHub README**   | Converted to llms.txt format (TOC from headings) | Fetched from builder-generated llms.txt   |
+| **Custom sources**  | User provides llms.txt URL in local registry     | Fetched directly from user-configured URL |
 
-**llms.txt is the preferred source** because it is authored by the library maintainers, structured for LLM consumption, and delivered as clean markdown — no scraping or HTML parsing required. Where llms.txt is not available, the GitHub adapter provides a universal fallback.
+**Key insight:** The builder guarantees that every library in the registry has a valid `llmsTxtUrl`. The MCP server is a simple fetch-parse-cache layer with no source-specific logic. This architectural shift moves complexity from runtime (critical path) to build time (weekly background job).
 
-The adapter chain is an internal implementation detail. Tools return consistent response shapes regardless of which source served the content. The agent never needs to know or care whether content came from llms.txt or GitHub.
+The agent never needs to know or care how the llms.txt was created - whether it's native, builder-generated, or custom. All tools return consistent responses.
 
 ### 3.3 The Table of Contents (TOC)
 
@@ -182,6 +175,7 @@ The TOC is returned by `get-library-info`. It is accessed exclusively via tool c
 > As a developer, when I ask "find LangChain", the agent should be able to discover matching libraries and their available languages.
 
 **Acceptance criteria:**
+
 - Agent calls `resolve-library` with a natural language query
 - Server returns a ranked list of matching libraries with IDs, names, descriptions, and supported languages
 - Fuzzy matching handles typos (e.g., "langchan" → "langchain")
@@ -193,6 +187,7 @@ The TOC is returned by `get-library-info`. It is accessed exclusively via tool c
 > As a developer, once a library is identified, the agent should be able to get its documentation index (TOC) and sources.
 
 **Acceptance criteria:**
+
 - Agent calls `get-library-info` with a specific libraryId
 - Server returns TOC, available sources, and library metadata
 - Agent can request specific TOC sections or the full TOC
@@ -204,6 +199,7 @@ The TOC is returned by `get-library-info`. It is accessed exclusively via tool c
 > As a developer, when I ask "what are the parameters for FastAPI's Depends()", the agent should get a focused answer quickly.
 
 **Acceptance criteria:**
+
 - Agent calls `get-docs` with one or more libraries and a topic
 - Server searches indexed documentation using BM25
 - Returns focused markdown content with source URL, confidence score
@@ -216,6 +212,7 @@ The TOC is returned by `get-library-info`. It is accessed exclusively via tool c
 > As a developer, when I ask "how do I implement a custom retry strategy with LangChain", the agent should be able to browse the documentation and find the right pages.
 
 **Acceptance criteria:**
+
 - Agent receives TOC from `get-library-info` (or reads it from a resource)
 - Agent reasons about which pages are relevant based on titles and descriptions
 - Agent calls `read-page` with a specific documentation URL
@@ -228,6 +225,7 @@ The TOC is returned by `get-library-info`. It is accessed exclusively via tool c
 > As a developer, when I ask "find all places that mention retry logic", the agent should search across documentation and return ranked results with links.
 
 **Acceptance criteria:**
+
 - Agent calls `search-docs` with a search query
 - Optionally scopes the search to specific libraries
 - If no libraries specified, searches across all previously indexed content
@@ -239,6 +237,7 @@ The TOC is returned by `get-library-info`. It is accessed exclusively via tool c
 > As a team lead, I want to deploy Pro-Context as a shared service so all team members benefit from cached documentation.
 
 **Acceptance criteria:**
+
 - Server starts in HTTP mode with `transport: http`
 - API keys are required for all requests
 - Admin CLI (`pro-context-admin`) can create, list, and revoke keys
@@ -250,8 +249,9 @@ The TOC is returned by `get-library-info`. It is accessed exclusively via tool c
 > As a developer, I expect useful responses even when documentation sources are temporarily unavailable.
 
 **Acceptance criteria:**
-- If primary source (llms.txt) fails, server falls back to GitHub adapter
-- If all sources fail but cache exists, stale cache is served with a warning
+
+- If llms.txt fetch fails, server returns recoverable error (agent can retry)
+- If fetch fails but cache exists, stale cache is served with a warning
 - If library is unknown, server returns fuzzy suggestions
 - Error responses include actionable recovery suggestions
 
@@ -266,6 +266,7 @@ Pro-Context exposes **5 tools**. The tool set is designed to support both the fa
 Discovers libraries matching a natural language query. This is a pure discovery tool — it finds libraries, it does not fetch documentation content.
 
 **Input Schema:**
+
 ```json
 {
   "type": "object",
@@ -284,6 +285,7 @@ Discovers libraries matching a natural language query. This is a pure discovery 
 ```
 
 **Output Schema:**
+
 ```json
 {
   "type": "object",
@@ -325,6 +327,7 @@ Discovers libraries matching a natural language query. This is a pure discovery 
 ```
 
 **Behavior:**
+
 1. Fuzzy-match `query` against curated library registry (in-memory, no network calls)
 2. Apply language filter if provided
 3. Return all matching libraries ranked by relevance score
@@ -333,6 +336,7 @@ Discovers libraries matching a natural language query. This is a pure discovery 
 **Registry-only approach**: Pro-Context uses a curated, pre-validated registry of libraries with working documentation. Unknown libraries return "not found" immediately — no runtime package registry queries, no speculative URL probing. This ensures high-confidence matches and eliminates false positives. The registry is updated weekly via automated build script.
 
 **If library not in registry**: Users have two options:
+
 1. **Custom sources config** — Add the library immediately via configuration:
    ```yaml
    sources:
@@ -345,6 +349,7 @@ Discovers libraries matching a natural language query. This is a pure discovery 
 2. **Submit a PR** — Request addition to the curated registry for all users
 
 **Error cases:**
+
 - Registry load failure → `INTERNAL_ERROR` (should not happen — registry is bundled with package)
 
 ---
@@ -356,6 +361,7 @@ Returns detailed information about a specific library: TOC and documentation sou
 This tool does not require a prior `resolve-library` call. If the agent already knows the `libraryId` (from a previous session, from user input, from context), it can call `get-library-info` directly.
 
 **Input Schema:**
+
 ```json
 {
   "type": "object",
@@ -375,6 +381,7 @@ This tool does not require a prior `resolve-library` call. If the agent already 
 ```
 
 **Output Schema:**
+
 ```json
 {
   "type": "object",
@@ -395,7 +402,7 @@ This tool does not require a prior `resolve-library` call. If the agent already 
     "sources": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Available documentation sources (e.g., ['llms.txt', 'github'])"
+      "description": "Documentation source type (always ['llms.txt'] - builder normalizes all sources)"
     },
     "toc": {
       "type": "array",
@@ -403,9 +410,18 @@ This tool does not require a prior `resolve-library` call. If the agent already 
         "type": "object",
         "properties": {
           "title": { "type": "string", "description": "Page title" },
-          "url": { "type": "string", "description": "Page URL (can be passed to read-page)" },
-          "description": { "type": "string", "description": "One-sentence description of the page" },
-          "section": { "type": "string", "description": "Section grouping (e.g., 'Getting Started', 'API Reference')" }
+          "url": {
+            "type": "string",
+            "description": "Page URL (can be passed to read-page)"
+          },
+          "description": {
+            "type": "string",
+            "description": "One-sentence description of the page"
+          },
+          "section": {
+            "type": "string",
+            "description": "Section grouping (e.g., 'Getting Started', 'API Reference')"
+          }
         }
       },
       "description": "Table of contents — documentation pages available for this library. Use read-page to fetch any of these URLs."
@@ -425,10 +441,11 @@ This tool does not require a prior `resolve-library` call. If the agent already 
 ```
 
 **Behavior:**
+
 1. Look up `libraryId` in registry (exact match, no fuzzy matching)
 2. If not found in registry → return `LIBRARY_NOT_FOUND` error
-3. Determine available documentation sources (llms.txt, GitHub, custom)
-4. Fetch and parse the TOC (source-agnostic — the adapter chain handles how). Documentation served is always the latest available.
+3. Fetch llms.txt from `library.llmsTxtUrl` (builder guarantees all libraries have valid URLs)
+4. Parse llms.txt format to extract TOC entries
 5. Extract `availableSections` from TOC entries (unique section names)
 6. If `sections` is specified, filter TOC entries to matching sections
 7. Cache the TOC
@@ -436,6 +453,7 @@ This tool does not require a prior `resolve-library` call. If the agent already 
 9. Return library metadata + TOC + availableSections
 
 **Performance characteristics:**
+
 - **First query for a library** (cold cache): 2-5 seconds
   - Network fetch of llms.txt or GitHub README
   - Parsing and TOC extraction
@@ -445,9 +463,10 @@ This tool does not require a prior `resolve-library` call. If the agent already 
 - This is by design: on-demand content fetching with aggressive caching ensures both freshness and performance
 
 **Error cases:**
+
 - Library not found in registry → `LIBRARY_NOT_FOUND`
-- llms.txt fetch failed → falls back to GitHub adapter
-- All adapters failed → `SOURCE_UNAVAILABLE`
+- llms.txt fetch returns 404 → `LLMS_TXT_NOT_FOUND`
+- Network error (timeout, connection failed) → `NETWORK_FETCH_FAILED` (recoverable)
 
 ---
 
@@ -456,6 +475,7 @@ This tool does not require a prior `resolve-library` call. If the agent already 
 The **fast path** tool. Retrieves focused documentation for a specific topic using server-side search (BM25). Best for keyword-heavy queries where the server can match effectively. Supports querying across multiple libraries in a single call.
 
 **Input Schema:**
+
 ```json
 {
   "type": "object",
@@ -465,7 +485,10 @@ The **fast path** tool. Retrieves focused documentation for a specific topic usi
       "items": {
         "type": "object",
         "properties": {
-          "libraryId": { "type": "string", "description": "Canonical library ID" }
+          "libraryId": {
+            "type": "string",
+            "description": "Canonical library ID"
+          }
         },
         "required": ["libraryId"]
       },
@@ -488,6 +511,7 @@ The **fast path** tool. Retrieves focused documentation for a specific topic usi
 ```
 
 **Output Schema:**
+
 ```json
 {
   "type": "object",
@@ -540,11 +564,12 @@ The **fast path** tool. Retrieves focused documentation for a specific topic usi
 ```
 
 **Behavior:**
+
 1. For each library in the `libraries` array:
    a. Check cache (memory → SQLite) for matching (libraryId, topic)
    b. If cached and fresh → use cached content
    c. If cached but stale → use stale content, trigger background refresh
-   d. If not cached → fetch documentation via adapter chain, chunk into sections, index with BM25
+   d. If not cached → fetch documentation from llmsTxtUrl via fetcher, chunk into sections, index with BM25
 2. Rank chunks across all specified libraries by topic relevance
 3. Select top chunk(s) within `maxTokens` budget
 4. Identify related pages from the TOC that the agent might want to read for more context
@@ -554,6 +579,7 @@ The **fast path** tool. Retrieves focused documentation for a specific topic usi
 **The `relatedPages` field**: This bridges the fast path and the navigation path. If the server-side BM25 search returns content with low confidence (e.g., <0.6), the `relatedPages` give the agent a way to navigate further. The agent sees "here's what I found, but you might also want to read these pages" — and can use `read-page` to explore them.
 
 **Performance characteristics:**
+
 - **First query for a library** (cold cache): 2-5 seconds
   - Network fetch of documentation pages
   - Markdown chunking (heading-aware splitting)
@@ -566,6 +592,7 @@ The **fast path** tool. Retrieves focused documentation for a specific topic usi
 - This is by design: incremental indexing avoids upfront bulk processing while ensuring fast repeat queries
 
 **Error cases:**
+
 - Any library in the array not found → `LIBRARY_NOT_FOUND` (identifies which library)
 - Topic not found across all specified libraries → `TOPIC_NOT_FOUND` with suggestion to try `search-docs` or browse the TOC via `get-library-info`
 - All sources unavailable → serve stale cache (if available) or `SOURCE_UNAVAILABLE`
@@ -577,6 +604,7 @@ The **fast path** tool. Retrieves focused documentation for a specific topic usi
 Searches across indexed documentation and returns ranked results with URLs. Optionally scoped to specific libraries, or searches across all previously indexed content.
 
 **Input Schema:**
+
 ```json
 {
   "type": "object",
@@ -603,6 +631,7 @@ Searches across indexed documentation and returns ranked results with URLs. Opti
 ```
 
 **Output Schema:**
+
 ```json
 {
   "type": "object",
@@ -612,12 +641,29 @@ Searches across indexed documentation and returns ranked results with URLs. Opti
       "items": {
         "type": "object",
         "properties": {
-          "libraryId": { "type": "string", "description": "Which library this result is from" },
+          "libraryId": {
+            "type": "string",
+            "description": "Which library this result is from"
+          },
           "title": { "type": "string", "description": "Section/page title" },
-          "snippet": { "type": "string", "description": "Relevant text excerpt (~100 tokens)" },
-          "relevance": { "type": "number", "minimum": 0, "maximum": 1, "description": "BM25 relevance score (normalized)" },
-          "url": { "type": "string", "description": "Page URL — use read-page to fetch full content" },
-          "section": { "type": "string", "description": "Documentation section path" }
+          "snippet": {
+            "type": "string",
+            "description": "Relevant text excerpt (~100 tokens)"
+          },
+          "relevance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "BM25 relevance score (normalized)"
+          },
+          "url": {
+            "type": "string",
+            "description": "Page URL — use read-page to fetch full content"
+          },
+          "section": {
+            "type": "string",
+            "description": "Documentation section path"
+          }
         }
       }
     },
@@ -635,6 +681,7 @@ Searches across indexed documentation and returns ranked results with URLs. Opti
 ```
 
 **Behavior:**
+
 1. If `libraryIds` provided, validate each exists in registry
 2. If no `libraryIds`, search across all content in the index (only previously fetched/indexed content — not a global search across all registry libraries)
 3. Execute BM25 search across indexed chunks (only libraries that have been queried before have indexed content)
@@ -653,17 +700,20 @@ The `search-docs` tool only searches libraries that have been queried previously
 The `searchedLibraries` field indicates which libraries had indexed content at query time. This transparency allows agents to understand search coverage.
 
 **Why incremental indexing?**
+
 - Avoids upfront bulk processing (hours to index 1000+ libraries)
 - Indexes only what's actually used (80%+ of libraries never queried)
 - Keeps index fresh (content indexed on-demand is never stale)
 - Storage efficient (only active libraries consume disk space)
 
 **If a library is not indexed yet:**
+
 - Agents should call `get-docs` first (which fetches and indexes the content)
 - Then call `search-docs` to search the newly indexed library
 - Or use `get-library-info` + `read-page` to navigate directly
 
 **Error cases:**
+
 - Specified library not in registry → `LIBRARY_NOT_FOUND`
 - No results → empty results array (not an error)
 
@@ -674,6 +724,7 @@ The `searchedLibraries` field indicates which libraries had indexed content at q
 The **navigation path** tool. Fetches a specific documentation page URL and returns its content as markdown. Supports offset-based reading for long pages.
 
 **Input Schema:**
+
 ```json
 {
   "type": "object",
@@ -701,6 +752,7 @@ The **navigation path** tool. Fetches a specific documentation page URL and retu
 ```
 
 **Output Schema:**
+
 ```json
 {
   "type": "object",
@@ -742,6 +794,7 @@ The **navigation path** tool. Fetches a specific documentation page URL and retu
 ```
 
 **Behavior:**
+
 1. Validate URL against the allowlist (see Security, Section 9)
 2. Check page cache for this URL
 3. If cached → serve from cache (applying offset/maxTokens)
@@ -755,6 +808,7 @@ The **navigation path** tool. Fetches a specific documentation page URL and retu
 **Offset-based reading**: When a page exceeds `maxTokens`, the response includes `hasMore: true` and position metadata. The agent can call `read-page` again with `offset` set to `offset + tokensReturned` to continue reading. The server caches the full page on first fetch, so subsequent offset reads are served from cache without re-fetching.
 
 **URL allowlist**: `read-page` does not fetch arbitrary URLs. It only fetches URLs that:
+
 - Appear in a resolved library's TOC
 - Are returned by `search-docs` results
 - Are returned as `relatedPages` by `get-docs`
@@ -764,6 +818,7 @@ The **navigation path** tool. Fetches a specific documentation page URL and retu
 This prevents SSRF while allowing flexible navigation within documentation.
 
 **Error cases:**
+
 - URL not in allowlist → `URL_NOT_ALLOWED` with suggestion to resolve the library first
 - URL returns 404 → `PAGE_NOT_FOUND`
 - URL returns non-documentation content → `INVALID_CONTENT`
@@ -790,9 +845,10 @@ Resources provide data that agents can access without tool calls.
     "sqliteEntries": 1024,
     "hitRate": 0.87
   },
-  "adapters": {
-    "llms-txt": { "status": "available", "lastSuccess": "2026-02-12T10:00:00Z" },
-    "github": { "status": "available", "rateLimitRemaining": 4850 }
+  "fetcher": {
+    "status": "available",
+    "lastSuccess": "2026-02-12T10:00:00Z",
+    "successRate": 0.98
   },
   "version": "1.0.0"
 }
@@ -807,7 +863,11 @@ Resources provide data that agents can access without tool calls.
 ```json
 {
   "libraries": [
-    { "id": "langchain-ai/langchain", "name": "LangChain", "languages": ["python"] },
+    {
+      "id": "langchain-ai/langchain",
+      "name": "LangChain",
+      "languages": ["python"]
+    },
     { "id": "pydantic/pydantic", "name": "Pydantic", "languages": ["python"] }
   ]
 }
@@ -843,14 +903,15 @@ Prompt templates provide reusable workflows that agents can invoke. Updated to r
 
 **Arguments:**
 
-| Name | Required | Description |
-|------|----------|-------------|
-| `libraryId` | Yes | Library to migrate |
-| `fromVersion` | Yes | Current version |
-| `toVersion` | Yes | Target version |
-| `codeSnippet` | No | Code to migrate |
+| Name          | Required | Description        |
+| ------------- | -------- | ------------------ |
+| `libraryId`   | Yes      | Library to migrate |
+| `fromVersion` | Yes      | Current version    |
+| `toVersion`   | Yes      | Target version     |
+| `codeSnippet` | No       | Code to migrate    |
 
 **Template:**
+
 ```
 You are helping migrate code from {libraryId} version {fromVersion} to {toVersion}.
 
@@ -863,7 +924,9 @@ Steps:
 {#if codeSnippet}
 Migrate the following code:
 ```
+
 {codeSnippet}
+
 ```
 {/if}
 
@@ -880,13 +943,14 @@ Provide:
 
 **Arguments:**
 
-| Name | Required | Description |
-|------|----------|-------------|
-| `libraryId` | Yes | Library where the issue occurs |
-| `errorMessage` | Yes | Error message or description |
-| `codeSnippet` | No | Code that produces the error |
+| Name           | Required | Description                    |
+| -------------- | -------- | ------------------------------ |
+| `libraryId`    | Yes      | Library where the issue occurs |
+| `errorMessage` | Yes      | Error message or description   |
+| `codeSnippet`  | No       | Code that produces the error   |
 
 **Template:**
+
 ```
 You are debugging an issue with {libraryId}.
 
@@ -895,7 +959,9 @@ Error: {errorMessage}
 {#if codeSnippet}
 Code:
 ```
+
 {codeSnippet}
+
 ```
 {/if}
 
@@ -917,12 +983,13 @@ Based on the documentation, identify:
 
 **Arguments:**
 
-| Name | Required | Description |
-|------|----------|-------------|
-| `libraryId` | Yes | Library containing the API |
-| `apiName` | Yes | API to explain (class, function, module) |
+| Name        | Required | Description                              |
+| ----------- | -------- | ---------------------------------------- |
+| `libraryId` | Yes      | Library containing the API               |
+| `apiName`   | Yes      | API to explain (class, function, module) |
 
 **Template:**
+
 ```
 Explain the {apiName} API from {libraryId}.
 
@@ -942,63 +1009,65 @@ Provide:
 
 ---
 
-## 8. Documentation Source Adapter Chain
+## 8. Documentation Fetching
 
-The adapter chain is an internal implementation detail. It determines how documentation is fetched, but does not affect tool interfaces or response shapes. All tools return consistent responses regardless of which adapter served the content.
+**Architectural shift**: All documentation sources are normalized to llms.txt format by the builder system (see `docs/builder/` for details). The MCP server is a simple fetch-parse-cache layer with no source-specific logic.
 
-### 8.1 Priority Order
+### 8.1 Fetching Flow
 
 ```
 Request
   │
   ▼
-[1] llms.txt ──── Best quality. Authored by library maintainers, structured for LLMs.
-  │                Checks: {docsUrl}/llms.txt
-  │ fail
+[1] Cache Check ─ Memory LRU → SQLite → miss
+  │ hit (fresh)
   ▼
-[2] GitHub ────── Universal fallback. Raw but authoritative.
-  │                Fetches: /docs/ directory, README.md
-  │ fail
+[Return] ──────── Serve from cache
+  │ hit (stale)
   ▼
-[3] Custom ────── User-configured. For internal/private docs.
-  │                Sources: URLs, local files, private GitHub repos
-  │ fail
+[Return + Refresh] Serve stale + background refresh
+  │ miss
   ▼
-[4] Stale Cache ─ Last resort. Serves expired cache with stale: true warning.
-  │ fail
+[2] Fetch ──────── HTTP GET library.llmsTxtUrl
+  │                All libraries have valid llms.txt URLs (builder guarantee)
+  │ success
   ▼
-[Error] ───────── LIBRARY_NOT_FOUND or SOURCE_UNAVAILABLE with recovery suggestions.
+[Parse + Cache] ─ Parse llms.txt format, store in cache
+  │
+  ▼
+[Return] ──────── Return documentation content
+  │ error (404, timeout, network)
+  ▼
+[Error] ───────── LLMS_TXT_NOT_FOUND or NETWORK_FETCH_FAILED with recoverable flag
 ```
 
-### 8.2 Adapter Contract
+**Key simplifications:**
 
-Each adapter implements a uniform interface. The server calls adapters in priority order until one succeeds. The adapter contract:
+- No adapter chain, no fallback logic, no priority ordering
+- Every library in registry has a valid `llmsTxtUrl` (guaranteed by builder)
+- Builder handles source-specific complexity at build time (GitHub, HTML docs, etc.)
+- MCP server only deals with HTTP GET + parse llms.txt format
+- Error handling is simple: HTTP errors → ProContextError with recovery info
 
-- `canHandle(library)` — can this adapter serve docs for this library?
-- `fetchToc(library)` — return a structured TOC (array of {title, url, description, section})
-- `fetchPage(url)` — fetch a single page, return markdown content
-- `checkFreshness(library, cached)` — is the cached content still valid?
+### 8.2 Custom Documentation Sources
 
-Adapters are responsible for source-specific concerns (parsing llms.txt format, using GitHub API, reading local files). The server and tools never see these details.
+For custom/internal documentation, users can add entries to their local registry override file (`~/.pro-context/custom-libraries.json`):
 
-### 8.3 Custom Sources
-
-Custom sources are configured in `pro-context.config.yaml`:
-
-```yaml
-sources:
-  custom:
-    - name: "internal-sdk"
-      type: "url"                # "url" | "file" | "github"
-      url: "https://internal.docs.company.com/sdk/llms.txt"
-      libraryId: "company/internal-sdk"
-    - name: "local-docs"
-      type: "file"
-      path: "/path/to/docs/llms.txt"
-      libraryId: "local/my-library"
+```json
+{
+  "libraries": [
+    {
+      "id": "company/internal-sdk",
+      "names": ["internal-sdk"],
+      "displayName": "Internal SDK",
+      "docsUrl": "https://internal.docs.company.com/sdk",
+      "llmsTxtUrl": "https://internal.docs.company.com/sdk/llms.txt"
+    }
+  ]
+}
 ```
 
-Custom sources follow the same adapter contract.
+Custom entries are merged with the official registry at startup. They must provide an llms.txt URL (builder cannot process internal/private sources).
 
 ---
 
@@ -1009,6 +1078,7 @@ Custom sources follow the same adapter contract.
 `read-page` fetches URLs provided by the agent. To prevent SSRF:
 
 **Default allowlist:**
+
 - `github.com`, `raw.githubusercontent.com`
 - `*.github.io`
 - `pypi.org`, `registry.npmjs.org`
@@ -1017,6 +1087,7 @@ Custom sources follow the same adapter contract.
 - Domains from any llms.txt file the server has fetched
 
 **Always blocked:**
+
 - Private IPs (127.0.0.1, 10.x, 172.16-31.x, 192.168.x)
 - `file://` URLs
 - Non-HTTP(S) protocols
@@ -1029,6 +1100,7 @@ Custom source domains from config are also added to the allowlist.
 ### 9.2 Input Validation
 
 All tool inputs are validated with Zod schemas at the MCP boundary:
+
 - `libraryId`: alphanumeric + `-_./`, max 200 chars
 - `topic`, `query`: max 500 chars
 - `url`: must be valid URL, must pass allowlist check
@@ -1061,10 +1133,10 @@ Language is **not** a server-side routing concern. The `languages` field on a Do
 
 ### 10.2 Package Registry Integration
 
-| Language | Registry | API |
-|----------|----------|-----|
-| Python | PyPI | `GET https://pypi.org/pypi/{package}/json` |
-| JavaScript (future) | npm | `GET https://registry.npmjs.org/{package}` |
+| Language            | Registry | API                                        |
+| ------------------- | -------- | ------------------------------------------ |
+| Python              | PyPI     | `GET https://pypi.org/pypi/{package}/json` |
+| JavaScript (future) | npm      | `GET https://registry.npmjs.org/{package}` |
 
 ### 10.3 Documentation Versioning
 
@@ -1090,24 +1162,25 @@ Pro-Context always serves the latest available documentation. Version-specific d
 
 ### 11.2 Error Catalog
 
-| Code | Trigger | Suggestion |
-|------|---------|-----------|
-| `LIBRARY_NOT_FOUND` | Unknown library ID | Did you mean '{suggestion}'? Use resolve-library to discover libraries. |
-| `TOPIC_NOT_FOUND` | BM25 search finds nothing for topic | Try search-docs for broader results, or browse the TOC via get-library-info. |
-| `PAGE_NOT_FOUND` | read-page URL returns 404 | Check the URL or use get-library-info to refresh the TOC. |
-| `URL_NOT_ALLOWED` | read-page URL fails allowlist check | Resolve the library first with get-library-info, or add the domain to your config. |
-| `SOURCE_UNAVAILABLE` | All adapters fail, no cache | Try again later. |
-| `REGISTRY_TIMEOUT` | PyPI/npm unreachable | Try again or specify the library ID directly. |
-| `RATE_LIMITED` | Token bucket exhausted | Try again after {retryAfter} seconds. |
-| `INDEXING_IN_PROGRESS` | Docs being fetched/indexed | Try again in {retryAfter} seconds. |
-| `AUTH_REQUIRED` | Missing API key (HTTP mode) | Provide API key via Authorization header. |
-| `AUTH_INVALID` | Bad/revoked API key | Check your API key. |
-| `INVALID_CONTENT` | Fetched URL is not documentation | URL does not appear to contain documentation. |
-| `INTERNAL_ERROR` | Unexpected server error | This has been logged. Try again. |
+| Code                   | Trigger                             | Suggestion                                                                         |
+| ---------------------- | ----------------------------------- | ---------------------------------------------------------------------------------- |
+| `LIBRARY_NOT_FOUND`    | Unknown library ID                  | Did you mean '{suggestion}'? Use resolve-library to discover libraries.            |
+| `TOPIC_NOT_FOUND`      | BM25 search finds nothing for topic | Try search-docs for broader results, or browse the TOC via get-library-info.       |
+| `PAGE_NOT_FOUND`       | read-page URL returns 404           | Check the URL or use get-library-info to refresh the TOC.                          |
+| `URL_NOT_ALLOWED`      | read-page URL fails allowlist check | Resolve the library first with get-library-info, or add the domain to your config. |
+| `SOURCE_UNAVAILABLE`   | llms.txt fetch fails, no cache      | Try again later.                                                                   |
+| `REGISTRY_TIMEOUT`     | PyPI/npm unreachable                | Try again or specify the library ID directly.                                      |
+| `RATE_LIMITED`         | Token bucket exhausted              | Try again after {retryAfter} seconds.                                              |
+| `INDEXING_IN_PROGRESS` | Docs being fetched/indexed          | Try again in {retryAfter} seconds.                                                 |
+| `AUTH_REQUIRED`        | Missing API key (HTTP mode)         | Provide API key via Authorization header.                                          |
+| `AUTH_INVALID`         | Bad/revoked API key                 | Check your API key.                                                                |
+| `INVALID_CONTENT`      | Fetched URL is not documentation    | URL does not appear to contain documentation.                                      |
+| `INTERNAL_ERROR`       | Unexpected server error             | This has been logged. Try again.                                                   |
 
 ### 11.3 Recovery Flows
 
 **Network failure:**
+
 ```
 Source fetch fails → Retry 2x with exponential backoff (1s, 3s)
   → All retries fail + cache exists → Serve stale cache (stale: true)
@@ -1115,12 +1188,14 @@ Source fetch fails → Retry 2x with exponential backoff (1s, 3s)
 ```
 
 **Unknown library with typo:**
+
 ```
 resolve-library("langchan") → Fuzzy match (Levenshtein distance ≤ 3)
   → Returns results with "langchain" ranked first
 ```
 
 **Low-confidence get-docs result:**
+
 ```
 get-docs returns content with confidence < 0.5
   → Response includes relatedPages from TOC
@@ -1136,9 +1211,9 @@ get-docs returns content with confidence < 0.5
 ```yaml
 # Server
 server:
-  transport: stdio             # "stdio" | "http"
-  port: 3100                   # HTTP port (http transport only)
-  host: "127.0.0.1"           # HTTP bind address
+  transport: stdio # "stdio" | "http"
+  port: 3100 # HTTP port (http transport only)
+  host: "127.0.0.1" # HTTP bind address
 
 # Cache
 cache:
@@ -1154,7 +1229,7 @@ sources:
     enabled: true
   github:
     enabled: true
-    token: ""                  # GitHub PAT (optional, increases rate limit from 60 to 5000/hr)
+    token: "" # GitHub PAT (optional, increases rate limit from 60 to 5000/hr)
   custom: []
 
 # Per-library overrides
@@ -1164,7 +1239,6 @@ libraryOverrides:
     ttlHours: 12
   fastapi:
     docsUrl: "https://fastapi.tiangolo.com"
-    source: "github"           # Force GitHub adapter
     ttlHours: 48
 
 # Rate limiting (HTTP mode only)
@@ -1174,26 +1248,26 @@ rateLimit:
 
 # Logging
 logging:
-  level: "info"                # "debug" | "info" | "warn" | "error"
-  format: "json"               # "json" | "pretty"
+  level: "info" # "debug" | "info" | "warn" | "error"
+  format: "json" # "json" | "pretty"
 
 # Security (HTTP mode only)
 security:
   cors:
     origins: ["*"]
-  urlAllowlist: []             # Additional allowed domains for read-page
+  urlAllowlist: [] # Additional allowed domains for read-page
 ```
 
 ### 12.2 Environment Variable Overrides
 
-| Config Key | Environment Variable | Example |
-|-----------|---------------------|---------|
-| `server.transport` | `PRO_CONTEXT_TRANSPORT` | `http` |
-| `server.port` | `PRO_CONTEXT_PORT` | `3100` |
-| `cache.directory` | `PRO_CONTEXT_CACHE_DIR` | `/data/cache` |
-| `sources.github.token` | `PRO_CONTEXT_GITHUB_TOKEN` | `ghp_xxx` |
-| `logging.level` | `PRO_CONTEXT_LOG_LEVEL` | `debug` |
-| — | `PRO_CONTEXT_DEBUG=true` | Shorthand for `debug` level |
+| Config Key             | Environment Variable       | Example                     |
+| ---------------------- | -------------------------- | --------------------------- |
+| `server.transport`     | `PRO_CONTEXT_TRANSPORT`    | `http`                      |
+| `server.port`          | `PRO_CONTEXT_PORT`         | `3100`                      |
+| `cache.directory`      | `PRO_CONTEXT_CACHE_DIR`    | `/data/cache`               |
+| `sources.github.token` | `PRO_CONTEXT_GITHUB_TOKEN` | `ghp_xxx`                   |
+| `logging.level`        | `PRO_CONTEXT_LOG_LEVEL`    | `debug`                     |
+| —                      | `PRO_CONTEXT_DEBUG=true`   | Shorthand for `debug` level |
 
 ---
 
@@ -1207,24 +1281,32 @@ Pro-Context is language-agnostic at the data model level. Language is informatio
 **Future**: JavaScript/TypeScript (npm), Rust (crates.io), Go (pkg.go.dev)
 
 Adding a new language requires:
+
 1. A registry resolver (e.g., `npm-resolver.ts`) that implements version resolution for the language's package registry
-2. Known-library entries with the new language in their `languages` array
-3. No changes to adapters, cache, search, tools, or config — these layers are language-agnostic by design
+2. Builder support for the language's package registry (e.g., npm scraping)
+3. Known-library entries with the new language in their `languages` array
+4. No changes to fetcher, cache, search, tools, or config — these layers are language-agnostic by design
 
 ### 13.2 Source Extensibility
 
-New documentation sources are added by implementing the adapter contract (Section 8.2):
-- `canHandle(library)` — can this adapter serve docs for this library?
-- `fetchToc(library)` — fetch the table of contents (latest)
-- `fetchPage(url)` — fetch a single documentation page
-- `checkFreshness(library, cached)` — is the cache still valid?
+New documentation sources are added in the builder system (see `docs/builder/`):
 
-Current adapters: llms-txt, github, custom
+- Builder discovers packages from registries (PyPI, npm, etc.)
+- Builder probes for native llms.txt files (10+ URL patterns)
+- Builder generates llms.txt for sources without native support (GitHub README/docs, HTML docs sites)
+- Builder publishes registry with llmsTxtUrl for every entry
 
-Future adapter candidates:
-- HTML scraper (for docs sites without llms.txt or GitHub source)
-- ReadTheDocs adapter
-- PyPI long-description adapter
+**Current builder sources:**
+
+- Native llms.txt (Mintlify, Fern, manually created)
+- GitHub README → llms.txt
+- GitHub docs/ → llms.txt
+
+**Future builder sources:**
+
+- HTML documentation sites (ReadTheDocs, Sphinx, Jekyll) → llms.txt
+- API documentation generators (Swagger, OpenAPI) → llms.txt
+- PyPI long-description → llms.txt
 
 ---
 
@@ -1295,6 +1377,22 @@ Future adapter candidates:
 **Decision**: Pro-Context does not fetch or use `llms-full.txt` files.
 
 **Rationale**: `llms-full.txt` can be enormous (Cloudflare: 3.7M tokens). It doesn't fit in a context window and must be chunked/indexed entirely before any search is possible. The per-page pattern (llms.txt index + read individual pages) is more aligned with the agent navigation paradigm and more efficient: pages are fetched and indexed on demand as the agent reads them. BM25 search quality improves organically as more pages are accessed. The upfront cost of downloading and indexing a multi-megabyte file for a single query is not justified.
+
+### D12: Pre-built registry vs runtime adapters
+
+**Decision**: All documentation source discovery and normalization happens at build time in the builder system (see `docs/builder/`). The MCP server is a simple fetch-parse-cache layer with no runtime adapters.
+
+**Rationale**:
+
+- **Simplicity**: MCP server becomes a single code path (HTTP GET + parse llms.txt), not 3+ adapter implementations
+- **Performance**: No source-specific logic at runtime, no fallback chains, no adapter priority evaluation
+- **Reliability**: All sources are pre-validated at build time, no runtime discovery failures
+- **Separation**: Data engineering (builder, batch, weekly runs) vs data serving (MCP server, real-time, low latency)
+- **Scalability**: Builder runs on GitHub Actions, handles all complexity (PyPI scraping, llms.txt probing, GitHub extraction, normalization)
+- **Coverage**: Builder can generate llms.txt for sources without native support (GitHub README/docs → llms.txt format)
+- **Guarantee**: Every library in registry has a valid `llmsTxtUrl` - no `LLMS_TXT_NOT_AVAILABLE` errors at runtime
+
+This architectural shift moves complexity from the critical path (user query) to the build pipeline (weekly background job). The MCP server trusts the builder's output and focuses on fast, reliable delivery.
 
 ---
 

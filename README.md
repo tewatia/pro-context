@@ -95,7 +95,7 @@ Pro-Context will support documentation from:
 | -------------------- | -------------------------------- | ------------------------------------------------------ |
 | **Python Libraries** | langchain, fastapi, pydantic     | Discovered via PyPI, fetches llms.txt or GitHub README |
 | **MCP Servers**      | @modelcontextprotocol/server-\*  | Registered in curated list, fetches from llms.txt      |
-| **GitHub Projects**  | svelte, supabase, anthropic      | Direct GitHub adapter, fetches /docs/ or README        |
+| **GitHub Projects**  | svelte, supabase, anthropic      | Builder converts GitHub /docs/ or README to llms.txt   |
 | **Custom Docs**      | Internal tools, private projects | Add via custom sources config                          |
 
 **Supported formats:**
@@ -145,14 +145,17 @@ We are finalizing comprehensive design specifications before implementation begi
 
 ### Documentation Structure
 
-The project has six detailed specification documents:
+The project has five detailed specification documents for the MCP server, plus separate builder system documentation:
 
+**MCP Server Specifications:**
 1. **[Competitive Analysis](docs/specs/01-competitive-analysis.md)** — Market research, accuracy benchmarks, key insights
 2. **[Functional Specification](docs/specs/02-functional-spec.md)** — MCP tools, user stories, error handling, security model
 3. **[Technical Specification](docs/specs/03-technical-spec.md)** — System architecture, data models, cache design, search engine
 4. **[Implementation Guide](docs/specs/04-implementation-guide.md)** — Project structure, dependencies, coding conventions, testing strategy
 5. **[Library Resolution](docs/specs/05-library-resolution.md)** — Registry schema, resolution algorithm, package grouping
-6. **[Registry Build System](docs/specs/06-registry-build-system.md)** — Build-time discovery pipeline, validation, quality assurance
+
+**Builder System Documentation** (data engineering pipeline, see `docs/builder/`):
+- 7 comprehensive documents covering PyPI scraping, llms.txt probing, GitHub extraction, normalization, and weekly GitHub Actions deployment
 
 **Design status**: All specifications are in draft/review phase. Implementation will begin once specs are finalized and approved.
 
@@ -160,7 +163,7 @@ The project has six detailed specification documents:
 
 - ✅ **Phase 0**: Specification/Design — _In Progress_
 - ⬜ **Phase 1**: Foundation (MCP server skeleton, config, logging) — _Not Started_
-- ⬜ **Phase 2**: Core Documentation Pipeline (adapters, cache, basic tools) — _Not Started_
+- ⬜ **Phase 2**: Core Documentation Pipeline (llms.txt fetcher, cache, basic tools) — _Not Started_
 - ⬜ **Phase 3**: Search & Navigation (BM25 indexing, search-docs, read-page) — _Not Started_
 - ⬜ **Phase 4**: HTTP Mode & Authentication (API keys, rate limiting) — _Not Started_
 - ⬜ **Phase 5**: Polish & Production Readiness (prompts, Docker, CI/CD) — _Not Started_

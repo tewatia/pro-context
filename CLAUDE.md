@@ -18,21 +18,32 @@ Ankur has recently been working with Generative AI-based applications. Since thi
 
 0. **Specification/Design Phase** - Define the problem, design the system architecture, and create detailed specifications for each component. This phase will culminate in a comprehensive documentation that will guide the implementation.
 1. **Foundation** — MCP server skeleton, config, logging, errors, stdio transport, health check
-2. **Core Documentation Pipeline** — Adapter chain, cache, `resolve-library` + `get-library-info` + `read-page` tools
+2. **Core Documentation Pipeline** — llms.txt fetcher, cache, `resolve-library` + `get-library-info` + `read-page` tools
 3. **Search & Navigation** — BM25 chunker/indexer, `get-docs` + `search-docs` tools, prompt templates
 4. **HTTP Mode & Authentication** — HTTP transport, API key auth, rate limiting, admin CLI
 5. **Polish & Production Readiness** — CI/CD, Docker, E2E tests, performance tuning
 
 **Current state**: The project is in the specification/design phase. There is no source code yet — only design documents in `docs/specs/`. **You are not allowed to write any code until the design phase is complete.** The design phase will be considered complete when all the documents are finalized and approved by Ankur.
 
-All implementation decisions are captured in these six spec documents, which are the authoritative design source.
+All implementation decisions are captured in these five spec documents, which are the authoritative design source. Additionally, the builder system (data engineering pipeline) is documented separately in `docs/builder/`.
 
 - `docs/specs/01-competitive-analysis.md` — Market analysis and key insight: query understanding is the accuracy bottleneck
-- `docs/specs/02-functional-spec.md` — Problem statement, 5 MCP tools, 2 resources, 3 prompt templates, adapter chain, security model
+- `docs/specs/02-functional-spec.md` — Problem statement, 5 MCP tools, 2 resources, 3 prompt templates, documentation fetching, security model
 - `docs/specs/03-technical-spec.md` — System architecture, data models, two-tier cache, BM25 search, database schema (7 SQLite tables)
 - `docs/specs/04-implementation-guide.md` — Project structure, dependencies, coding conventions, 6 implementation phases (0-5), testing strategy
-- `docs/specs/05-library-resolution.md` — Library name → documentation source mapping, runtime resolution algorithm (6 steps), curated registries as seed data (llms-txt-hub, Awesome-llms-txt), PyPI enrichment, repo-based grouping
-- `docs/specs/06-registry-build-system.md` — Build-time discovery pipeline, PyPI metadata extraction, llms.txt probing (10+ URL patterns), content validation, hub resolution, quality assurance
+- `docs/specs/05-library-resolution.md` — Library name → documentation source mapping, runtime resolution algorithm (6 steps), simplified registry schema (builder guarantee)
+
+### Builder System Documentation
+
+The registry builder system is documented separately (data engineering vs data serving separation):
+
+- `docs/builder/01-overview.md` — Problem statement, architecture, relationship to pro-context MCP server
+- `docs/builder/02-functional-spec.md` — Requirements, input sources, output artifacts, quality criteria
+- `docs/builder/03-technical-spec.md` — Technology stack, 8-step pipeline, data models, rate limiting
+- `docs/builder/04-implementation-guide.md` — Project structure, dependencies, implementation phases, testing
+- `docs/builder/05-discovery-pipeline.md` — PyPI collection, llms.txt probing (10+ URL patterns), GitHub fallback
+- `docs/builder/06-normalization.md` — Converting all sources to llms.txt format, TOC generation
+- `docs/builder/07-deployment.md` — GitHub Actions, GitHub Pages, monitoring, incremental updates
 
 ### Research Documents
 

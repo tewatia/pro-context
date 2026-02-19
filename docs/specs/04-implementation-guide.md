@@ -68,12 +68,7 @@ pro-context/
 │       │   ├── migrate_code.py     # migrate-code prompt template
 │       │   ├── debug_with_docs.py  # debug-with-docs prompt template
 │       │   └── explain_api.py      # explain-api prompt template
-│       ├── adapters/
-│       │   ├── __init__.py
-│       │   ├── types.py            # SourceAdapter ABC + RawPageContent type
-│       │   ├── llms_txt.py         # llms.txt adapter implementation (Phase 1-3)
-│       │   ├── github.py           # GitHub docs adapter (Phase 4+, deferred)
-│       │   └── custom.py           # User-configured source adapter (Phase 4+, deferred)
+│       ├── fetcher.py              # HTTP fetch + parse llms.txt (simple, no adapters)
 │       ├── auth/
 │       │   ├── __init__.py
 │       │   ├── api_keys.py         # API key creation, validation, hashing
@@ -115,10 +110,7 @@ pro-context/
 │   │   │   ├── test_chunker.py
 │   │   │   ├── test_bm25.py
 │   │   │   └── test_engine.py
-│   │   ├── adapters/
-│   │   │   ├── test_llms_txt.py
-│   │   │   ├── test_github.py
-│   │   │   └── test_chain.py
+│   │   ├── test_fetcher.py         # Test HTTP fetch + llms.txt parsing
 │   │   ├── lib/
 │   │   │   ├── test_fuzzy_match.py
 │   │   │   ├── test_rate_limiter.py
@@ -126,7 +118,7 @@ pro-context/
 │   │   └── registry/
 │   │       └── test_pypi_resolver.py
 │   ├── integration/
-│   │   ├── test_adapter_cache.py    # Adapter + cache integration
+│   │   ├── test_fetcher_cache.py    # Fetcher + cache integration
 │   │   ├── test_search_pipeline.py  # Fetch → chunk → index → search
 │   │   └── test_auth_flow.py        # API key auth end-to-end
 │   └── e2e/
@@ -393,7 +385,7 @@ Thumbs.db
 | Element | Convention | Example |
 |---------|-----------|---------|
 | Files | snake_case | `fuzzy_match.py`, `get_docs.py` |
-| Classes | PascalCase | `Library`, `DocResult`, `SourceAdapter` |
+| Classes | PascalCase | `Library`, `DocResult`, `LlmsTxtParser` |
 | Functions | snake_case | `resolve_library`, `fetch_toc`, `check_freshness` |
 | Constants | UPPER_SNAKE_CASE | `DEFAULT_TTL_HOURS`, `MAX_TOKENS` |
 | Config keys | snake_case (YAML) | `max_memory_mb`, `default_ttl_hours` |
@@ -601,9 +593,9 @@ class TestBM25Index:
 
 ### Phase 2: Core Documentation Pipeline
 
-**Goal**: Source adapter interface, curated library registry, **llms.txt adapter only** (GitHub/Custom deferred to Phase 4+), two-tier cache, `resolve-library` tool, `get-library-info` tool, `get-docs` tool.
+**Goal**: Simple llms.txt fetcher, curated library registry (builder-generated), two-tier cache, `resolve-library` tool, `get-library-info` tool, `get-docs` tool.
 
-**Scope limitation**: Phase 2 only implements llms.txt adapter. Libraries without llms.txt return `LLMS_TXT_NOT_AVAILABLE` error. This focuses the implementation on proven technology while keeping architecture clean for future extensions.
+**Architectural shift**: All documentation sources are normalized to llms.txt format by the builder system (see `docs/builder/`). The MCP server is a simple fetch-parse-cache layer with no source-specific logic. Every library in the registry has a valid llmsTxtUrl.
 
 **Verification gate**: `resolve-library("langchain")` returns matches from curated registry; `get-library-info` returns TOC; `get-docs` for LangChain returns documentation from llms.txt.
 
@@ -613,14 +605,12 @@ class TestBM25Index:
    - `src/pro_context/registry/types.py` — `Library` dataclass, registry loader interface
    - `src/pro_context/registry/known_libraries.py` — Registry loader: loads `known-libraries.json` into memory, builds lookup indexes (ID, package name, fuzzy search corpus)
    - `src/pro_context/lib/fuzzy_match.py` — Levenshtein distance (rapidfuzz) + `find_closest_matches()`
-   - `data/known-libraries.json` — Comprehensive registry of ~1,350 libraries (top 1000 PyPI + curated sources), all marked with `llmsTxtAvailable` field
+   - `data/known-libraries.json` — Comprehensive registry (builder-generated, see `docs/builder/` for details)
 
-2. **Source Adapters** (llms.txt only for Phase 2)
-   - `src/pro_context/adapters/types.py` — `SourceAdapter` ABC, `RawPageContent` dataclass, `TocEntry` dataclass
-   - `src/pro_context/adapters/llms_txt.py` — Fetch and parse `llms.txt` for TOC, fetch individual pages
-   - ~~`src/pro_context/adapters/chain.py`~~ — **Deferred to Phase 4+** (no chain needed with single adapter)
-   - ~~`src/pro_context/adapters/github.py`~~ — **Deferred to Phase 4+** (design complete in doc 03)
-   - ~~`src/pro_context/adapters/custom.py`~~ — **Deferred to Phase 4+** (design complete in doc 03)
+2. **Documentation Fetcher** (simple HTTP fetch + parse)
+   - `src/pro_context/fetcher.py` — Fetch llms.txt via HTTP, parse TOC, fetch individual pages
+   - All documentation sources have llms.txt URLs (guaranteed by builder system)
+   - No source-specific logic needed (builder handles normalization)
 
 3. **Cache**
    - `src/pro_context/cache/sqlite.py` — SQLite cache: init DB, get/set/delete operations, cleanup
@@ -628,9 +618,9 @@ class TestBM25Index:
    - `src/pro_context/cache/manager.py` — Two-tier cache orchestrator: memory → SQLite → miss
 
 4. **Tools**
-   - `src/pro_context/tools/resolve_library.py` — Fuzzy match query against registry, return all matches with languages, check `llmsTxtAvailable` field
-   - `src/pro_context/tools/get_library_info.py` — Check `llmsTxtAvailable`, fetch TOC via llms.txt adapter, extract availableSections, apply sections filter
-   - `src/pro_context/tools/get_docs.py` — Multi-library: fetch docs via cache → llms.txt adapter → chunk → BM25 rank → return with relatedPages
+   - `src/pro_context/tools/resolve_library.py` — Fuzzy match query against registry, return all matches with languages
+   - `src/pro_context/tools/get_library_info.py` — Fetch TOC via fetcher (HTTP GET llmsTxtUrl), extract availableSections, apply sections filter
+   - `src/pro_context/tools/get_docs.py` — Multi-library: fetch docs via cache → fetcher → chunk → BM25 rank → return with relatedPages
 
 5. **Resources**
    - `src/pro_context/resources/session.py` — `pro-context://session/resolved-libraries` resource
@@ -638,16 +628,14 @@ class TestBM25Index:
 6. **Registration**
    - Update `src/pro_context/server.py` — Register `resolve-library`, `get-library-info`, `get-docs` tools + session resource
 
-7. **Tests** (Phase 2: llms.txt only)
-   - `tests/unit/registry/test_known_libraries.py` — Registry loading, index building, lookups, `llmsTxtAvailable` flag
+7. **Tests**
+   - `tests/unit/registry/test_known_libraries.py` — Registry loading, index building, lookups
    - `tests/unit/lib/test_fuzzy_match.py` — Levenshtein distance + matching
-   - `tests/unit/adapters/test_llms_txt.py` — Parse llms.txt TOC, fetch pages, handle 404, handle missing llms.txt
-   - ~~`tests/unit/adapters/test_github.py`~~ — **Deferred to Phase 4+**
-   - ~~`tests/unit/adapters/test_chain.py`~~ — **Deferred to Phase 4+**
+   - `tests/unit/test_fetcher.py` — Parse llms.txt TOC, fetch pages, handle 404, handle HTTP errors
    - `tests/unit/cache/test_memory.py` — TTL cache operations
    - `tests/unit/cache/test_sqlite.py` — SQLite CRUD + cleanup, stale flag handling
    - `tests/unit/cache/test_manager.py` — Two-tier promotion + stale handling
-   - `tests/integration/test_adapter_cache.py` — Full fetch → cache → serve flow (llms.txt only)
+   - `tests/integration/test_fetcher_cache.py` — Full fetch → cache → serve flow
 
 #### Phase 2 Verification Checklist
 
@@ -656,8 +644,7 @@ class TestBM25Index:
 - [ ] `get-library-info("langchain-ai/langchain")` returns TOC with availableSections
 - [ ] `get-library-info("langchain-ai/langchain", sections: ["Getting Started"])` returns filtered TOC
 - [ ] `get-docs([{libraryId: "langchain-ai/langchain"}], "chat models")` returns markdown content
-- [ ] Content comes from llms.txt when available
-- [ ] If llms.txt unavailable, falls back to GitHub
+- [ ] All documentation is fetched from llms.txt URLs (guaranteed by builder)
 - [ ] Second request for same content is served from cache (check logs for cache hit)
 - [ ] Cache SQLite file is created at configured path
 - [ ] Session resource tracks resolved libraries
@@ -758,7 +745,7 @@ class TestBM25Index:
 
 ### Phase 5: Polish & Production Readiness
 
-**Goal**: Prompt templates, custom source adapter completion, Docker deployment, comprehensive test suite, documentation.
+**Goal**: Prompt templates, Docker deployment, comprehensive test suite, documentation.
 
 **Verification gate**: Full e2e test passes — Claude Code connects, resolves library, gets info, gets docs, searches, reads pages. Docker image builds and runs.
 
@@ -826,14 +813,12 @@ class TestBM25Index:
 | Memory cache | Get/set/delete, TTL, LRU eviction | — | Nothing |
 | SQLite cache | CRUD, cleanup, expiry | — | Nothing (use in-memory SQLite) |
 | Page cache | Full page store, offset slicing, hasMore | — | Nothing (use in-memory SQLite) |
-| Cache manager | Tier promotion, stale handling | Adapter + cache flow | Network fetches |
-| llms.txt adapter | Parse llms.txt TOC, fetchPage, handle 404 | Full fetch → cache | HTTP responses |
-| GitHub adapter | Generate TOC from directory, fetchPage, rate limit | Full fetch → cache | HTTP responses |
-| Adapter chain | Fallback on failure, priority order | Full chain with cache | HTTP responses |
+| Cache manager | Tier promotion, stale handling | Fetcher + cache flow | Network fetches |
+| llms.txt fetcher | Parse llms.txt TOC, fetch pages, handle 404 | Full fetch → cache | HTTP responses |
 | PyPI resolver | Version parsing, latest detection | — | HTTP responses |
 | API key auth | Hash validation, key format | Create → auth → revoke | Nothing (use test SQLite) |
 | Search engine | Index + query orchestration, cross-library | Fetch → chunk → index → search | HTTP responses |
-| Tool handlers | Input validation, output format | — | Core engine (mock adapters) |
+| Tool handlers | Input validation, output format | — | Core engine (mock fetcher) |
 
 ### 5.3 What NOT to Test
 
@@ -1200,18 +1185,7 @@ pro-context-admin key create --name "test"
 **Changes:**
 - `src/pro_context/tools/resolve_library.py` — Route to npm resolver when `language: "javascript"` or `"typescript"`
 
-**No changes needed in:** adapters, cache, search, config, auth, transport
-
-### Phase 7: HTML Documentation Adapter
-
-**New files:**
-- `src/pro_context/adapters/html_docs.py` — Fetch and parse HTML documentation sites
-- `src/pro_context/lib/html_to_markdown.py` — HTML → markdown conversion with sanitization
-
-**New dependencies:** `beautifulsoup4` + `lxml` for HTML parsing, `markdownify` for conversion
-
-**Changes:**
-- `src/pro_context/adapters/chain.py` — Add HTML adapter to the chain with appropriate priority
+**No changes needed in:** cache, search, config, auth, transport (fetcher already handles all llms.txt sources)
 
 ### Phase 8: Vector Search (Hybrid)
 
@@ -1366,12 +1340,11 @@ claude mcp add pro-context -- python -m pro_context
 4. Lint: `ruff check .`
 5. Format: `ruff format .`
 
-### Adding a New Source Adapter
+### Adding Support for New Documentation Sources
 
-1. Create `src/pro_context/adapters/{name}.py` implementing `SourceAdapter` ABC
-2. Implement `can_handle`, `fetch_toc`, `fetch_page`, `check_freshness` async methods
-3. Register in `src/pro_context/adapters/chain.py` with appropriate priority
-4. Add tests in `tests/unit/adapters/test_{name}.py`
-5. Add integration test if the adapter has external dependencies
-6. Run full test suite: `uv run pytest` or `pytest`
-7. Type check: `uv run mypy src/pro_context/adapters/{name}.py` or `mypy src/pro_context/adapters/{name}.py`
+All documentation sources are handled by the builder system (see `docs/builder/` for details). To add a new source:
+
+1. Update the builder's discovery pipeline to include the new source
+2. Builder will generate llms.txt files for sources without native support
+3. Registry will be updated automatically during weekly builds
+4. MCP server requires no changes (fetcher already handles all llms.txt URLs)
