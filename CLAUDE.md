@@ -42,6 +42,13 @@ Additional research documents that inform the specifications:
 - `docs/research/llms-txt-resolution-strategy.md` — Approved strategy for resolving library names to llms.txt URLs: registry-first approach with smart fallback, hub detection, content validation, and maintenance plan
 - `docs/research/llms-txt-discovery-research.md` — Research on discovering libraries with llms.txt support, including curated registries (llms-txt-hub, Awesome-llms-txt) and Mintlify auto-generation findings
 
+### Review Documents
+
+Documents tracking gaps, issues, and decisions made during the design phase:
+
+- `docs/reviews/spec-gap-analysis.md` — Pre-implementation gap analysis of `docs/specs/`: identifies missing documents (operations guide, user docs, security spec, API reference) and missing components within each existing spec, with a prioritized action list
+- `docs/reviews/pending-items.md` — Living document tracking pending decisions, missing components, and open questions: technology stack gaps (markdown parser, CLI framework), registry update mechanism design, FTS5 sync triggers, implementation decisions, and future enhancements
+
 You are allowed to create new documents if you think that the discussion warrants it. Make sure you edit this section to link to any new documents you create.
 
 ## Overview of tech stack, architecture, coding conventions, configurations, commands and testing strategy

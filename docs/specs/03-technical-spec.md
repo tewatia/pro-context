@@ -30,40 +30,42 @@
   - [5.5 Cache Key Strategy](#55-cache-key-strategy)
   - [5.6 Cache Invalidation Signals](#56-cache-invalidation-signals)
   - [5.7 Background Refresh](#57-background-refresh)
-- [6. Search Engine Design](#6-search-engine-design)
-  - [6.1 Document Chunking Strategy](#61-document-chunking-strategy)
-  - [6.2 BM25 Search Implementation](#62-bm25-search-implementation)
-  - [6.3 Cross-Library Search](#63-cross-library-search)
-  - [6.4 Incremental Indexing](#64-incremental-indexing)
-  - [6.5 Ranking and Token Budgeting](#65-ranking-and-token-budgeting)
-- [7. Token Efficiency Strategy](#7-token-efficiency-strategy)
-  - [7.1 Target Metrics](#71-target-metrics)
-  - [7.2 Techniques](#72-techniques)
-  - [7.3 Token Counting](#73-token-counting)
-- [8. Transport Layer](#8-transport-layer)
-  - [8.1 stdio Transport (Local Mode)](#81-stdio-transport-local-mode)
-  - [8.2 Streamable HTTP Transport (HTTP Mode)](#82-streamable-http-transport-http-mode)
-- [9. Authentication and API Key Management](#9-authentication-and-api-key-management)
-  - [9.1 Key Generation](#91-key-generation)
-  - [9.2 Key Validation Flow](#92-key-validation-flow)
-  - [9.3 Admin CLI](#93-admin-cli)
-- [10. Rate Limiting Design](#10-rate-limiting-design)
-  - [10.1 Token Bucket Algorithm](#101-token-bucket-algorithm)
-  - [10.2 Rate Limit Headers](#102-rate-limit-headers)
-  - [10.3 Per-Key Overrides](#103-per-key-overrides)
-- [11. Security Model](#11-security-model)
-  - [11.1 Input Validation](#111-input-validation)
-  - [11.2 SSRF Prevention](#112-ssrf-prevention)
-  - [11.3 Secret Redaction](#113-secret-redaction)
-  - [11.4 Content Sanitization](#114-content-sanitization)
-- [12. Observability](#12-observability)
-  - [12.1 Structured Logging](#121-structured-logging)
-  - [12.2 Key Metrics](#122-key-metrics)
-  - [12.3 Health Check](#123-health-check)
-- [13. Extensibility Points](#13-extensibility-points)
-  - [13.1 Adding a New Language](#131-adding-a-new-language)
-  - [13.2 Adding a New Documentation Source](#132-adding-a-new-documentation-source)
-  - [13.3 Adding a New Tool](#133-adding-a-new-tool)
+- [6. Registry Update Mechanism](#6-registry-update-mechanism)
+  - [6.1 Registry Distribution Strategy](#61-registry-distribution-strategy)
+  - [6.2 Local Storage](#62-local-storage)
+  - [6.3 Update Detection and Download](#63-update-detection-and-download)
+  - [6.4 Database Synchronization](#64-database-synchronization)
+  - [6.5 Configuration](#65-configuration)
+- [7. Search Engine Design](#7-search-engine-design)
+  - [7.1 Document Chunking Strategy](#71-document-chunking-strategy)
+  - [7.2 BM25 Search Implementation](#72-bm25-search-implementation)
+  - [7.3 Cross-Library Search](#73-cross-library-search)
+  - [7.4 Incremental Indexing](#74-incremental-indexing)
+  - [7.5 Ranking and Token Budgeting](#75-ranking-and-token-budgeting)
+- [8. Token Efficiency Strategy](#8-token-efficiency-strategy)
+  - [8.1 Target Metrics](#81-target-metrics)
+  - [8.2 Techniques](#82-techniques)
+  - [8.3 Token Counting](#83-token-counting)
+- [9. Transport Layer](#9-transport-layer)
+  - [9.1 stdio Transport (Local Mode)](#91-stdio-transport-local-mode)
+  - [9.2 Streamable HTTP Transport (HTTP Mode)](#92-streamable-http-transport-http-mode)
+- [10. Authentication and API Key Management](#10-authentication-and-api-key-management)
+  - [10.1 Key Generation](#101-key-generation)
+  - [10.2 Key Validation Flow](#102-key-validation-flow)
+  - [10.3 Admin CLI](#103-admin-cli)
+- [11. Rate Limiting Design](#11-rate-limiting-design)
+  - [11.1 Token Bucket Algorithm](#111-token-bucket-algorithm)
+  - [11.2 Rate Limit Headers](#112-rate-limit-headers)
+  - [11.3 Per-Key Overrides](#113-per-key-overrides)
+- [12. Security Model](#12-security-model)
+  - [12.1 Input Validation](#121-input-validation)
+  - [12.2 SSRF Prevention](#122-ssrf-prevention)
+  - [12.3 Secret Redaction](#123-secret-redaction)
+  - [12.4 Content Sanitization](#124-content-sanitization)
+- [13. Observability](#13-observability)
+  - [13.1 Structured Logging](#131-structured-logging)
+  - [13.2 Key Metrics](#132-key-metrics)
+  - [13.3 Health Check](#133-health-check)
 - [14. Database Schema](#14-database-schema)
   - [14.1 SQLite Tables](#141-sqlite-tables)
   - [14.2 Database Initialization](#142-database-initialization)
@@ -206,14 +208,8 @@ MCP Client
 
 **Version Pinning Strategy**: All dependencies use SemVer-compatible ranges. Lower bounds represent minimum tested versions (latest at project start). Lock files (`uv.lock` + `requirements.txt`) pin exact versions for reproducible builds. See Implementation Guide (Doc 04) for detailed dependency management workflow.
 
-### Dependency Justification
+### Architectural "Not Chosen" Decisions
 
-- **Python 3.12**: Latest stable release with per-interpreter GIL (better performance), improved error messages, asyncio improvements, all needed features.
-- **`uv` over `pip`**: 10-100x faster installation, built-in lock file support, better dependency resolution. Fallback to `pip` + `pip-tools` for compatibility.
-- **`aiosqlite` over `sqlite3`**: Async compatibility with `asyncio` event loop. Stdlib `sqlite3` blocks the event loop on writes.
-- **`cachetools` over `functools.lru_cache`**: TTL support is essential for cache expiry. `functools.lru_cache` has no TTL mechanism.
-- **`httpx` over `aiohttp`**: Cleaner API, better timeout handling, HTTP/2 support, sync/async unified interface.
-- **`structlog` over stdlib `logging`**: Context binding (correlation IDs), structured output, processor pipelines for redaction.
 - **No vector database**: BM25 handles keyword-heavy documentation search well without requiring an embedding model. Vector search deferred to future phase.
 - **No Redis**: SQLite provides sufficient persistence for cache. No external infrastructure needed.
 - **No web framework**: MCP SDK handles HTTP transport internally (Starlette under the hood). No FastAPI/Flask needed.
@@ -343,13 +339,14 @@ class PageResult:
 class ErrorCode(str, Enum):
     """Error codes for ProContextError"""
     LIBRARY_NOT_FOUND = "LIBRARY_NOT_FOUND"
+    LLMS_TXT_NOT_AVAILABLE = "LLMS_TXT_NOT_AVAILABLE"  # Library in registry but no llms.txt
     TOPIC_NOT_FOUND = "TOPIC_NOT_FOUND"
     PAGE_NOT_FOUND = "PAGE_NOT_FOUND"
     URL_NOT_ALLOWED = "URL_NOT_ALLOWED"
     INVALID_CONTENT = "INVALID_CONTENT"
     SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
     NETWORK_FETCH_FAILED = "NETWORK_FETCH_FAILED"
-    LLMS_TXT_NOT_FOUND = "LLMS_TXT_NOT_FOUND"
+    LLMS_TXT_NOT_FOUND = "LLMS_TXT_NOT_FOUND"  # llms.txt URL returns 404
     STALE_CACHE_EXPIRED = "STALE_CACHE_EXPIRED"
     RATE_LIMITED = "RATE_LIMITED"
     AUTH_REQUIRED = "AUTH_REQUIRED"
@@ -661,7 +658,15 @@ checkFreshness(library, cached):
   4. Return true if cache is still valid
 ```
 
-#### GitHub Adapter
+**Implementation scope:**
+- **Phase 1-3**: Only llms.txt adapter implemented (see doc 04 for implementation priorities)
+- **Phase 4+**: GitHub and Custom adapters added for broader source support
+
+---
+
+#### GitHub Adapter (Phase 4+)
+
+**Status**: Design complete, implementation deferred to Phase 4+
 
 ```
 canHandle(library):
@@ -685,7 +690,9 @@ checkFreshness(library, cached):
   3. Return true if SHA matches (content unchanged)
 ```
 
-#### Custom Adapter
+#### Custom Adapter (Phase 4+)
+
+**Status**: Design complete, implementation deferred to Phase 4+
 
 ```
 canHandle(library):
@@ -893,9 +900,133 @@ If background refresh fails (network error, site down, 404), the server:
 
 ---
 
-## 6. Search Engine Design
+## 6. Registry Update Mechanism
 
-### 6.1 Document Chunking Strategy
+**IMPORTANT**: The registry (`known-libraries.json`) is **completely independent from the pro-context package version**.
+
+- **Registry updates** do NOT require updating the pro-context package
+- **Users download new libraries** without reinstalling pro-context
+- **Separate release cadence**: Registry updates weekly, code updates as-needed
+- **Different versioning**: Registry uses date-based versions (`registry-v2024-02-20`), code uses semver (`v0.1.0`)
+
+This separation allows frequent data updates without code changes.
+
+### 6.1 Registry Distribution Strategy
+
+**Release strategy:**
+- **Code releases**: Semantic versioning (`v0.1.0`, `v0.2.0`, etc.)
+- **Registry releases**: Date-based versioning (`registry-v2024-02-19`, `registry-v2024-02-26`, etc.)
+
+**Distribution:**
+- Registry hosted as GitHub Release assets on the same repository
+- Each registry release includes:
+  ```
+  registry-v2024-02-19/
+    ├── known-libraries.json          # The registry data (1-2MB)
+    ├── registry_metadata.json        # Version, checksum, stats
+    └── known-libraries.json.gz       # Compressed (optional, 200-300KB)
+  ```
+
+**Metadata format:**
+```json
+{
+  "version": "registry-v2024-02-19",
+  "created_at": "2024-02-19T10:00:00Z",
+  "total_entries": 1247,
+  "checksum": "sha256:abc123...",
+  "download_url": "https://github.com/tewatia/pro-context/releases/download/registry-v2024-02-19/known-libraries.json"
+}
+```
+
+**Bundled fallback:**
+- Pro-context package bundles a registry snapshot at build time
+- Used if local copy is missing or GitHub is unreachable
+- Ensures offline functionality
+
+### 6.2 Local Storage
+
+**Location:** `~/.local/share/pro-context/registry/`
+
+```
+~/.local/share/pro-context/
+  ├── cache.db                      # SQLite cache + search index
+  └── registry/
+      ├── known-libraries.json      # Current registry
+      └── registry_metadata.json    # Version info
+```
+
+**Permissions:**
+- Directory created on first run if it doesn't exist
+- Files owned by user running pro-context
+- No special permissions required
+
+### 6.3 Update Detection and Download
+
+**stdio mode (local):**
+
+On startup, load the local registry from disk immediately (server is available with local/bundled data). Spawn a non-blocking background task that fetches the latest `registry_metadata.json` from GitHub. If the version differs from local, download the new registry, validate its checksum, and save to local storage. The updated registry is used on next startup. Any failures (network error, checksum mismatch) are silently ignored — the server continues with the current registry.
+
+**HTTP mode (long-running server):**
+
+A background task polls GitHub for registry updates every 24 hours. When a new version is detected: download it, compute the diff (entries added, removed, or with changed `llms_txt_url`), mark affected cache entries as stale in the database, then atomically swap the in-memory registry. No server restart required.
+
+**Diff strategy:** Compare old and new registries by `library_id`. Classify each library as: added, removed, or `url_changed` (only `llms_txt_url` changes matter — they invalidate cached content). All other metadata changes are safe to apply without cache invalidation.
+
+### 6.4 Database Synchronization
+
+When a registry update is applied, all cache entries for libraries with changed `llms_txt_url` are marked `stale = 1` in a single batched UPDATE within a transaction. The registry version is recorded in `system_metadata`. Stale entries are served immediately (with `stale: true`) while a background refresh fetches fresh content.
+
+**Safety guarantees:**
+
+1. **Transaction atomicity**: If server crashes mid-update, SQLite rolls back. Old data intact.
+
+2. **Concurrent query safety**: SQLite WAL mode allows reads during writes. No deadlocks.
+
+3. **Content preservation**: Never delete cached data. Only mark as `stale = 1`. This preserves:
+   - Search index (FTS5 content intact)
+   - No cold start penalty (old data available while fetching new)
+   - Graceful degradation (if new fetch fails, stale data still works)
+
+**Edge case handling:**
+
+| Scenario | Behavior |
+|----------|----------|
+| Update fails halfway | Transaction rollback, old registry still active |
+| DB locked by long query | WAL mode allows concurrent access, minimal delay |
+| 500 URLs change at once | Single query, ~30ms lock, all marked stale |
+| Server crashes during update | Transaction rollback on startup, retry |
+| New URL returns 404 | Serve stale data, retry later, log warning |
+| Offline (no GitHub) | Skip update, use current registry |
+
+### 6.5 Configuration
+
+**config.yaml:**
+```yaml
+registry:
+  auto_update: true                         # Check for updates automatically
+  update_check_interval_seconds: 86400      # 24 hours (HTTP mode only)
+  github_repo: "tewatia/pro-context"
+  fallback_to_bundled: true                 # Use bundled registry if fetch fails
+  storage_path: "~/.local/share/pro-context/registry"  # Local storage location
+
+  # Optional: Override registry URL (for private registries)
+  # registry_url: "https://internal.company.com/pro-context-registry.json"
+```
+
+**Manual update command:**
+```bash
+# Check for and download latest registry
+pro-context update-registry
+
+# For HTTP servers: triggers hot reload
+# For stdio: used on next startup
+```
+
+---
+
+## 7. Search Engine Design
+
+### 7.1 Document Chunking Strategy
 
 Raw documentation is chunked into focused sections for indexing and retrieval.
 
@@ -924,54 +1055,27 @@ Raw documentation is chunked into focused sections for indexing and retrieval.
 | Paragraph chunk (oversized sections) | 300 | 100 | 500 |
 | Code example chunk | Variable | 50 | 2,000 |
 
-### 6.2 BM25 Search Implementation
+### 7.2 BM25 Search Implementation
 
-BM25 (Best Match 25) is used for keyword-based relevance ranking.
+BM25 ranking is provided by SQLite FTS5's built-in `bm25()` function. FTS5 handles tokenization, inverted index maintenance, and scoring internally. Queries use the `MATCH` operator against `search_fts`, ordered by `bm25(search_fts)`.
 
-**Parameters:**
+**Parameters** (passed as FTS5 column weights or via configuration):
 - `k1 = 1.5` (term frequency saturation)
 - `b = 0.75` (document length normalization)
 
-**Index structure:**
+Results are normalized to a 0–1 relevance score before returning to callers.
 
-```
-For each chunk:
-  1. Tokenize content (lowercase, strip punctuation)
-  2. Compute term frequencies (TF)
-  3. Store in inverted index: term → [(chunkId, TF), ...]
-
-Global:
-  - Document count (N)
-  - Average document length (avgDL)
-  - Document frequencies (DF): term → count of docs containing term
-```
-
-**Query execution:**
-
-```
-1. Tokenize query
-2. For each query term:
-   a. Look up inverted index → get matching chunks with TF
-   b. Compute IDF: log((N - DF + 0.5) / (DF + 0.5) + 1)
-   c. For each matching chunk:
-      - Compute BM25 score: IDF * (TF * (k1 + 1)) / (TF + k1 * (1 - b + b * DL/avgDL))
-3. Sum BM25 scores across query terms for each chunk
-4. Sort by total score (descending)
-5. Normalize scores to 0-1 range
-6. Return top N results
-```
-
-### 6.3 Cross-Library Search
+### 7.3 Cross-Library Search
 
 When `search-docs` is called without `libraryIds`, it searches across all indexed content. The BM25 index contains chunks from all libraries, each tagged with their `libraryId`. Results are ranked globally — a highly relevant chunk from library A ranks above a marginally relevant chunk from library B.
 
 The `searchedLibraries` field in the response lists which libraries had indexed content at query time, so the agent knows the search scope.
 
-### 6.4 Incremental Indexing
+### 7.4 Incremental Indexing
 
 Pages are indexed for BM25 as they're fetched — by `get-docs` (JIT fetch), `get-library-info` (TOC fetch), and `read-page` (page fetch). The search index grows organically as the agent uses Pro-Context. There is no upfront bulk indexing step.
 
-### 6.5 Ranking and Token Budgeting
+### 7.5 Ranking and Token Budgeting
 
 When returning results via `get-docs`, the system applies a token budget:
 
@@ -989,9 +1093,9 @@ When returning results via `get-docs`, the system applies a token budget:
 
 ---
 
-## 7. Token Efficiency Strategy
+## 8. Token Efficiency Strategy
 
-### 7.1 Target Metrics
+### 8.1 Target Metrics
 
 | Metric | Target | Benchmark |
 |--------|--------|-----------|
@@ -999,7 +1103,7 @@ When returning results via `get-docs`, the system applies a token budget:
 | Accuracy | >85% | Deepcon: 90% |
 | Tokens per correct answer | <3,529 | Deepcon: 2,628 |
 
-### 7.2 Techniques
+### 8.2 Techniques
 
 1. **Focused chunking**: Split docs into small, self-contained sections (target: 500 tokens/chunk)
 2. **Relevance ranking**: BM25 ensures only relevant chunks are returned
@@ -1009,15 +1113,15 @@ When returning results via `get-docs`, the system applies a token budget:
 6. **Offset-based reading**: `read-page` returns slices of large pages, avoiding re-sending content the agent has already seen
 7. **TOC section filtering**: `get-library-info` with `sections` parameter returns only relevant sections of large TOCs
 
-### 7.3 Token Counting
+### 8.3 Token Counting
 
 Approximate token count using character count / 4. This is sufficient for budgeting purposes — exact token counts are model-specific and not needed.
 
 ---
 
-## 8. Transport Layer
+## 9. Transport Layer
 
-### 8.1 stdio Transport (Local Mode)
+### 9.1 stdio Transport (Local Mode)
 
 ```python
 # src/pro_context/__main__.py
@@ -1049,7 +1153,7 @@ if __name__ == "__main__":
 - Communication via stdin/stdout
 - Process lifecycle managed by MCP client
 
-### 8.2 Streamable HTTP Transport (HTTP Mode)
+### 9.2 Streamable HTTP Transport (HTTP Mode)
 
 ```python
 # src/pro_context/__main__.py (HTTP mode)
@@ -1107,9 +1211,9 @@ uvicorn.run(app, host=config.server.host, port=config.server.port)
 
 ---
 
-## 9. Authentication and API Key Management
+## 10. Authentication and API Key Management
 
-### 9.1 Key Generation
+### 10.1 Key Generation
 
 ```
 1. Generate 32 random bytes using crypto.randomBytes()
@@ -1121,7 +1225,7 @@ uvicorn.run(app, host=config.server.host, port=config.server.port)
 
 **Key format**: `pc_` prefix + 40 chars base64url = `pc_aBcDeFgH...` (43 chars total)
 
-### 9.2 Key Validation Flow
+### 10.2 Key Validation Flow
 
 ```
 1. Extract Bearer token from Authorization header
@@ -1133,7 +1237,7 @@ uvicorn.run(app, host=config.server.host, port=config.server.port)
 7. Update last_used_at and request_count
 ```
 
-### 9.3 Admin CLI
+### 10.3 Admin CLI
 
 ```bash
 # Create a new API key
@@ -1153,9 +1257,9 @@ The admin CLI is a separate entry point (`src/pro_context/auth/admin_cli.py`) th
 
 ---
 
-## 10. Rate Limiting Design
+## 11. Rate Limiting Design
 
-### 10.1 Token Bucket Algorithm
+### 11.1 Token Bucket Algorithm
 
 Each API key gets its own token bucket:
 
@@ -1172,7 +1276,7 @@ On request:
   4. If tokens < 1 → reject with RATE_LIMITED, retryAfter = (1 - tokens) / refillRate
 ```
 
-### 10.2 Rate Limit Headers
+### 11.2 Rate Limit Headers
 
 HTTP responses include rate limit headers:
 
@@ -1182,7 +1286,7 @@ X-RateLimit-Remaining: 42
 X-RateLimit-Reset: 1707700000
 ```
 
-### 10.3 Per-Key Overrides
+### 11.3 Per-Key Overrides
 
 API keys can have custom rate limits:
 
@@ -1194,9 +1298,9 @@ SELECT rate_limit_per_minute FROM api_keys WHERE key_hash = ?;
 
 ---
 
-## 11. Security Model
+## 12. Security Model
 
-### 11.1 Input Validation
+### 12.1 Input Validation
 
 All inputs are validated at the MCP boundary using Pydantic models before any processing:
 
@@ -1237,7 +1341,7 @@ class ReadPageInput(BaseModel):
         return v
 ```
 
-### 11.2 SSRF Prevention
+### 12.2 SSRF Prevention
 
 URL fetching is restricted to known documentation domains:
 
@@ -1282,7 +1386,7 @@ def is_allowed_url(url: str, allowlist: list[str]) -> bool:
 - Custom sources in config are added to the allowlist
 - **Dynamic expansion**: When an llms.txt file is fetched, all URLs in it are added to the session allowlist
 
-### 11.3 Secret Redaction
+### 12.3 Secret Redaction
 
 structlog logger is configured with processor pipelines for secret redaction:
 
@@ -1317,7 +1421,7 @@ structlog.configure(
 )
 ```
 
-### 11.4 Content Sanitization
+### 12.4 Content Sanitization
 
 Documentation content is treated as untrusted text:
 
@@ -1328,9 +1432,9 @@ Documentation content is treated as untrusted text:
 
 ---
 
-## 12. Observability
+## 13. Observability
 
-### 12.1 Structured Logging
+### 13.1 Structured Logging
 
 Every request produces a structured log entry:
 
@@ -1352,7 +1456,7 @@ Every request produces a structured log entry:
 }
 ```
 
-### 12.2 Key Metrics
+### 13.2 Key Metrics
 
 | Metric | Description | Exposed Via |
 |--------|-------------|-------------|
@@ -1364,7 +1468,7 @@ Every request produces a structured log entry:
 | Error rate | % of requests returning errors | health resource |
 | Rate limit rejections | Count of rate-limited requests | logs |
 
-### 12.3 Health Check
+### 13.3 Health Check
 
 The `pro-context://health` resource returns:
 
@@ -1388,44 +1492,6 @@ Status determination:
 
 ---
 
-## 13. Extensibility Points
-
-### 13.1 Adding a New Language
-
-1. **Create registry resolver**: `src/pro_context/registry/{language}_resolver.py`
-   - Implement version resolution for the language's package registry
-   - Follow the same interface as `pypi_resolver.py`
-
-2. **Add known libraries**: Add entries to `src/pro_context/registry/known_libraries.py`
-   - Each entry includes `languages: ["{language}"]` and language-specific metadata
-
-3. **No changes required in**: adapters, cache, search, tools, config
-   - Adapters work by URL — they don't care about the language
-   - Cache is keyed by libraryId — language-agnostic
-   - Search indexes content — language-agnostic
-
-### 13.2 Adding a New Documentation Source
-
-1. **Create adapter**: `src/pro_context/adapters/{source_name}.py`
-   - Implement the `SourceAdapter` ABC (can_handle, fetch_toc, fetch_page, check_freshness)
-   - Define `priority` property relative to existing adapters
-
-2. **Register adapter**: Add to the adapter chain in `src/pro_context/adapters/chain.py`
-
-3. **No changes required in**: tools, cache, search, config schema (unless source-specific config is needed)
-
-### 13.3 Adding a New Tool
-
-1. **Create tool handler**: `src/pro_context/tools/{tool_name}.py`
-   - Define Pydantic input/output schemas
-   - Implement async handler function
-
-2. **Register tool**: Add to server setup in `src/pro_context/server.py`
-
-3. **No changes required in**: adapters, cache, search, other tools
-
----
-
 ## 14. Database Schema
 
 ### 14.1 SQLite Tables
@@ -1442,12 +1508,14 @@ CREATE TABLE IF NOT EXISTS doc_cache (
   adapter TEXT NOT NULL,
   fetched_at TEXT NOT NULL,       -- ISO 8601
   expires_at TEXT NOT NULL,       -- ISO 8601
+  stale INTEGER NOT NULL DEFAULT 0, -- 1 if registry URL changed, requires background refresh
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_doc_cache_library ON doc_cache(library_id);
 CREATE INDEX IF NOT EXISTS idx_doc_cache_expires ON doc_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_doc_cache_stale ON doc_cache(stale) WHERE stale = 1;
 
 -- Page cache (full pages from read-page)
 CREATE TABLE IF NOT EXISTS page_cache (
@@ -1459,10 +1527,12 @@ CREATE TABLE IF NOT EXISTS page_cache (
   content_hash TEXT NOT NULL,
   fetched_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
+  stale INTEGER NOT NULL DEFAULT 0, -- 1 if registry URL changed, requires background refresh
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_page_cache_expires ON page_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_page_cache_stale ON page_cache(stale) WHERE stale = 1;
 
 -- TOC cache
 CREATE TABLE IF NOT EXISTS toc_cache (
@@ -1471,10 +1541,12 @@ CREATE TABLE IF NOT EXISTS toc_cache (
   toc_json TEXT NOT NULL,          -- JSON array of TocEntry
   available_sections TEXT NOT NULL, -- JSON array of section names
   fetched_at TEXT NOT NULL,
-  expires_at TEXT NOT NULL
+  expires_at TEXT NOT NULL,
+  stale INTEGER NOT NULL DEFAULT 0 -- 1 if registry URL changed, requires background refresh
 );
 
 CREATE INDEX IF NOT EXISTS idx_toc_cache_library ON toc_cache(library_id);
+CREATE INDEX IF NOT EXISTS idx_toc_cache_stale ON toc_cache(stale) WHERE stale = 1;
 
 -- Search index (BM25 term index)
 CREATE TABLE IF NOT EXISTS search_chunks (
@@ -1537,6 +1609,17 @@ CREATE TABLE IF NOT EXISTS session_libraries (
   languages TEXT NOT NULL,           -- JSON array (informational metadata)
   resolved_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- System metadata (registry version, etc.)
+CREATE TABLE IF NOT EXISTS system_metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Initialize with registry version
+INSERT OR IGNORE INTO system_metadata (key, value)
+VALUES ('registry_version', 'bundled');  -- Updated on first registry load
 ```
 
 ### 14.2 Database Initialization

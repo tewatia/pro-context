@@ -131,7 +131,10 @@ A Documentation Source entry contains the following fields:
 
 **llms.txt Support:**
 
-- `llmsTxt` (object, optional): Present if library has a validated llms.txt file
+- `llmsTxtAvailable` (boolean, required): Whether llms.txt is available for this library
+  - `true`: Library has validated llms.txt file (llmsTxt object present)
+  - `false`: Library is tracked but no llms.txt available (Phase 1-3: returns LLMS_TXT_NOT_AVAILABLE error)
+- `llmsTxt` (object, optional): Present only if `llmsTxtAvailable` is `true`
   - `url` (string, required): llms.txt URL (validated)
   - `platform` (string, optional): Documentation platform (mintlify, vitepress, custom, etc.)
   - `lastValidated` (string, required): Last validation timestamp (ISO format)
@@ -189,22 +192,24 @@ A Documentation Source entry contains the following fields:
       ]
     },
     "aliases": ["lang-chain", "lang chain"],
+    "llmsTxtAvailable": true,
     "llmsTxt": {
       "url": "https://python.langchain.com/llms.txt",
       "platform": "mintlify",
-      "lastValidated": "2026-02-17"
+      "lastValidated": "2026-02-20"
     }
   },
   {
-    "id": "langgraph",
-    "name": "LangGraph",
-    "docsUrl": "https://langchain-ai.github.io/langgraph",
-    "repoUrl": "https://github.com/langchain-ai/langgraph",
+    "id": "requests",
+    "name": "Requests",
+    "docsUrl": "https://requests.readthedocs.io",
+    "repoUrl": "https://github.com/psf/requests",
     "languages": ["python"],
     "packages": {
-      "pypi": ["langgraph", "langgraph-sdk", "langgraph-checkpoint"]
+      "pypi": ["requests"]
     },
-    "aliases": ["lang-graph", "lang graph"]
+    "aliases": [],
+    "llmsTxtAvailable": false
   },
   {
     "id": "pydantic",
@@ -221,6 +226,7 @@ A Documentation Source entry contains the following fields:
       ]
     },
     "aliases": [],
+    "llmsTxtAvailable": true,
     "llmsTxt": {
       "url": "https://docs.pydantic.dev/latest/llms.txt",
       "platform": "custom",

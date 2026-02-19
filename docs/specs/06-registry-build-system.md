@@ -34,16 +34,22 @@
 
 ## 1. Overview
 
-The Registry Build System is a **build-time** process that discovers, validates, and curates library documentation into a production-ready registry file (`known-libraries.json`). This registry is bundled with Pro-Context and loaded at runtime — the MCP server never calls PyPI or probes URLs directly.
+The Registry Build System is a **build-time** process that discovers, validates, and curates library documentation into a production-ready registry file (`known-libraries.json`). This registry is **independent from pro-context package version** and is published separately on GitHub Releases.
 
-**Core responsibility**: Transform the chaotic landscape of Python packages into a curated, validated registry of libraries with working documentation.
+**Core responsibility**: Transform the chaotic landscape of Python packages into a comprehensive registry of popular libraries, marking which have llms.txt documentation available.
+
+**Registry scope**:
+- **Broad coverage**: Top 1000 PyPI packages + curated llms.txt sources + MCP servers + popular GitHub projects
+- **All libraries included**: Even libraries without llms.txt are tracked (marked `llmsTxtAvailable: false`)
+- **Clear availability marking**: Users know what's tracked vs what's available
 
 **Key principles**:
-1. **Validate everything** — No URL goes into the registry without verification
-2. **Group intelligently** — Detect monorepo sub-packages using Repository URL
-3. **Robust error handling** — Network failures, rate limits, HTML error pages — handle gracefully
-4. **Audit trail** — Every decision (include, exclude, group, separate) is logged
-5. **Reproducible** — Same input = same output, deterministic grouping rules
+1. **Include everything popular** — Top 1000 PyPI packages are all tracked
+2. **Validate llms.txt availability** — Mark which libraries have working llms.txt
+3. **Group intelligently** — Detect monorepo sub-packages using Repository URL
+4. **Robust error handling** — Network failures, rate limits, HTML error pages — handle gracefully
+5. **Audit trail** — Every decision (include, exclude, group, separate) is logged
+6. **Reproducible** — Same input = same output, deterministic grouping rules
 
 **Execution cadence**:
 - **Community edition**: Weekly via GitHub Actions
@@ -1297,6 +1303,8 @@ Generate build statistics:
 
 ### 9.1 known-libraries.json
 
+**Key change**: All entries include `llmsTxtAvailable` field to explicitly mark availability.
+
 ```json
 [
   {
@@ -1316,11 +1324,24 @@ Generate build statistics:
       ]
     },
     "aliases": ["lang-chain", "lang chain"],
+    "llmsTxtAvailable": true,
     "llmsTxt": {
       "url": "https://python.langchain.com/llms.txt",
       "platform": "mintlify",
-      "lastValidated": "2026-02-18T10:15:23Z"
+      "lastValidated": "2026-02-20T10:15:23Z"
     }
+  },
+  {
+    "id": "requests/requests",
+    "name": "Requests",
+    "docsUrl": "https://requests.readthedocs.io",
+    "repoUrl": "https://github.com/psf/requests",
+    "languages": ["python"],
+    "packages": {
+      "pypi": ["requests"]
+    },
+    "aliases": [],
+    "llmsTxtAvailable": false
   },
   {
     "id": "pydantic/pydantic",
@@ -1332,26 +1353,11 @@ Generate build statistics:
       "pypi": ["pydantic", "pydantic-core", "pydantic-settings"]
     },
     "aliases": ["pydanctic"],
+    "llmsTxtAvailable": true,
     "llmsTxt": {
       "url": "https://docs.pydantic.dev/latest/llms.txt",
       "platform": "custom",
-      "lastValidated": "2026-02-18T10:16:15Z"
-    }
-  },
-  {
-    "id": "supabase-python",
-    "name": "Supabase Python SDK",
-    "docsUrl": "https://supabase.com/docs/reference/python",
-    "repoUrl": "https://github.com/supabase/supabase-py",
-    "languages": ["python"],
-    "packages": {
-      "pypi": ["supabase"]
-    },
-    "aliases": ["supabase"],
-    "llmsTxt": {
-      "url": "https://supabase.com/llms/python.txt",
-      "platform": "custom",
-      "lastValidated": "2026-02-18T10:17:42Z"
+      "lastValidated": "2026-02-20T10:16:15Z"
     }
   }
 ]
@@ -1359,10 +1365,16 @@ Generate build statistics:
 
 ### 9.2 File Size Estimates
 
-| Registry Size | File Size | Load Time (in-memory) |
-|---------------|-----------|----------------------|
-| 1,000 packages → ~700 DocSources | ~150KB | ~5ms |
-| 5,000 packages → ~3,500 DocSources | ~700KB | ~20ms |
+**Scope**:
+- **Community edition**: Top 1000 PyPI + ~350 curated (llms-txt-hub, MCP, GitHub) = **~1,350 total entries**
+- **Enterprise edition**: Top 5000 PyPI + ~350 curated = **~5,350 total entries**
+
+**Expected llms.txt coverage**: ~60-70% of PyPI packages, ~95%+ of curated sources
+
+| Registry Size | Entries | With llms.txt | File Size | Load Time |
+|---------------|---------|---------------|-----------|-----------|
+| Community | 1,350 | ~850 (63%) | ~300KB | ~10ms |
+| Enterprise | 5,350 | ~3,400 (64%) | ~1.2MB | ~35ms |
 
 ---
 

@@ -15,6 +15,7 @@ Pro-Context is an open-source [Model Context Protocol (MCP)](https://modelcontex
 ## The Problem
 
 AI coding agents often hallucinate outdated or incorrect API details because:
+
 - They're trained on old data
 - Documentation changes frequently
 - They lack access to current library docs
@@ -23,35 +24,63 @@ AI coding agents often hallucinate outdated or incorrect API details because:
 
 ---
 
+## How Pro-Context Differs
+
+Existing documentation tools fall into two categories, each with limitations:
+
+| Approach                 | Examples               | Speed                 | Accuracy | Limitation                                                                            |
+| ------------------------ | ---------------------- | --------------------- | -------- | ------------------------------------------------------------------------------------- |
+| **Server-Side Search**   | Context7, Deepcon      | Fast (1 tool call)    | 65-75%   | Requires expensive query understanding model; server must interpret vague user intent |
+| **Agent-Side RAG**       | Custom implementations | Slow (2-4 tool calls) | 90%+     | Agent controls search but makes multiple trips; 5-15s per query                       |
+| **Pro-Context (Hybrid)** | _This project_         | **Fast + Flexible**   | **90%+** | Best of both: Server BM25 search (2-5s, 1 call) + Agent navigation when needed        |
+
+**Key differentiators:**
+
+- 🧠 **No query understanding model needed** — Agent's LLM already knows what it wants; just needs fast search
+- ⚡ **Registry-first resolution** — <10ms library lookup, no runtime discovery API calls
+- 📦 **Curated registry** — 1000+ pre-validated sources (PyPI, MCP servers, GitHub projects)
+- 🎯 **llms.txt native** — Purpose-built for AI-optimized documentation format
+- 🔄 **Always fresh** — On-demand fetching ensures docs are never stale
+
+See [`docs/specs/01-competitive-analysis.md`](docs/specs/01-competitive-analysis.md) for detailed benchmarks and research.
+
+---
+
 ## Planned Features
 
 ### 🎯 **Curated Registry**
+
 - Pre-validated documentation sources for 1000+ projects
 - Python libraries (PyPI), MCP servers, GitHub projects, standalone tools
 - Weekly automated updates to discover new documentation
 
 ### 📄 **llms.txt Support**
+
 - Native support for the [llms.txt standard](https://llmstxt.org) (AI-optimized documentation)
 - Automatic discovery across documentation platforms (Mintlify, VitePress, custom)
 - Fallback to GitHub README for projects without llms.txt
 
 ### ⚡ **Fast & Efficient**
+
 - **First query**: 2-5 seconds (fetch + parse + cache)
 - **Subsequent queries**: <100ms (served from cache)
 - BM25 full-text search across indexed documentation
 - Incremental indexing (only indexes what you actually use)
 
 ### 🔍 **Hybrid Retrieval**
+
 - **Fast path**: Server-side BM25 search for keyword queries
 - **Navigation path**: Agent-driven browsing of TOC and pages
 - Agents get the best of both: speed + flexibility
 
 ### 🔄 **Always Fresh**
+
 - On-demand fetching ensures documentation is never stale
 - Automatic background refresh when cache expires (24hr TTL)
 - Serves latest documentation regardless of package version
 
 ### 🔧 **Flexible Configuration**
+
 - Add custom documentation sources instantly via config
 - No code changes needed for private/internal docs
 - stdio (local) or HTTP (remote) transport
@@ -62,14 +91,15 @@ AI coding agents often hallucinate outdated or incorrect API details because:
 
 Pro-Context will support documentation from:
 
-| Type | Examples | How It Works |
-|------|----------|--------------|
-| **Python Libraries** | langchain, fastapi, pydantic | Discovered via PyPI, fetches llms.txt or GitHub README |
-| **MCP Servers** | @modelcontextprotocol/server-* | Registered in curated list, fetches from llms.txt |
-| **GitHub Projects** | svelte, supabase, anthropic | Direct GitHub adapter, fetches /docs/ or README |
-| **Custom Docs** | Internal tools, private projects | Add via custom sources config |
+| Type                 | Examples                         | How It Works                                           |
+| -------------------- | -------------------------------- | ------------------------------------------------------ |
+| **Python Libraries** | langchain, fastapi, pydantic     | Discovered via PyPI, fetches llms.txt or GitHub README |
+| **MCP Servers**      | @modelcontextprotocol/server-\*  | Registered in curated list, fetches from llms.txt      |
+| **GitHub Projects**  | svelte, supabase, anthropic      | Direct GitHub adapter, fetches /docs/ or README        |
+| **Custom Docs**      | Internal tools, private projects | Add via custom sources config                          |
 
 **Supported formats:**
+
 - ✅ llms.txt (AI-optimized markdown)
 - ✅ GitHub README.md
 - ✅ GitHub /docs/ directories
@@ -99,6 +129,7 @@ Pro-Context uses a **registry-first, lazy-fetch** architecture:
 ```
 
 **Key principles:**
+
 - **Registry-only resolution**: No runtime network calls for discovery
 - **On-demand content fetching**: Only fetch docs that are actually used
 - **Incremental indexing**: Search index grows as agents use the server
@@ -127,12 +158,12 @@ The project has six detailed specification documents:
 
 ### Implementation Roadmap
 
-- ✅ **Phase 0**: Specification/Design — *In Progress*
-- ⬜ **Phase 1**: Foundation (MCP server skeleton, config, logging) — *Not Started*
-- ⬜ **Phase 2**: Core Documentation Pipeline (adapters, cache, basic tools) — *Not Started*
-- ⬜ **Phase 3**: Search & Navigation (BM25 indexing, search-docs, read-page) — *Not Started*
-- ⬜ **Phase 4**: HTTP Mode & Authentication (API keys, rate limiting) — *Not Started*
-- ⬜ **Phase 5**: Polish & Production Readiness (prompts, Docker, CI/CD) — *Not Started*
+- ✅ **Phase 0**: Specification/Design — _In Progress_
+- ⬜ **Phase 1**: Foundation (MCP server skeleton, config, logging) — _Not Started_
+- ⬜ **Phase 2**: Core Documentation Pipeline (adapters, cache, basic tools) — _Not Started_
+- ⬜ **Phase 3**: Search & Navigation (BM25 indexing, search-docs, read-page) — _Not Started_
+- ⬜ **Phase 4**: HTTP Mode & Authentication (API keys, rate limiting) — _Not Started_
+- ⬜ **Phase 5**: Polish & Production Readiness (prompts, Docker, CI/CD) — _Not Started_
 
 ---
 
@@ -158,6 +189,7 @@ Contributions are welcome! Since we're in the design phase:
 ### Future Contributions
 
 Once implementation begins (after Phase 0), we'll welcome:
+
 - Code contributions following the implementation guide
 - Additional documentation sources for the registry
 - Bug reports and fixes
@@ -190,9 +222,7 @@ This project is licensed under the **GNU General Public License v3.0** - see the
 
 ---
 
-## Author
-
-**Ankur Tewatia** — Senior Lead Consultant with 10+ years of experience in software engineering, currently focused on Generative AI applications.
+## Purpose & Vision
 
 Pro-Context was created to solve the accuracy problem in AI coding agents by providing them with reliable, up-to-date documentation access.
 
