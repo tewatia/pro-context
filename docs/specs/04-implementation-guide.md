@@ -2,7 +2,7 @@
 
 > **Document**: 04-implementation-guide.md
 > **Status**: Draft v2
-> **Last Updated**: 2026-02-16
+> **Last Updated**: 2026-02-21
 > **Depends on**: 03-technical-spec.md (v2)
 
 ---
@@ -17,6 +17,9 @@
   - [3.3 Test Pattern](#33-test-pattern)
   - [3.4 Module Pattern](#34-module-pattern)
   - [3.5 Async Pattern](#35-async-pattern)
+  - [3.5.1 Protocol-First Design](#351-protocol-first-design)
+  - [3.6 Security Rules](#36-security-rules)
+  - [3.7 Known Type Checking Gotchas](#37-known-type-checking-gotchas)
 - [4. Implementation Phases](#4-implementation-phases)
   - [Phase 1: Foundation](#phase-1-foundation)
   - [Phase 2: Core Documentation Pipeline](#phase-2-core-documentation-pipeline)
@@ -68,6 +71,7 @@ pro-context/
 │       │   ├── migrate_code.py     # migrate-code prompt template
 │       │   ├── debug_with_docs.py  # debug-with-docs prompt template
 │       │   └── explain_api.py      # explain-api prompt template
+│       ├── protocols.py            # Infrastructure Protocol definitions (PEP 544)
 │       ├── fetcher.py              # HTTP fetch + parse llms.txt (simple, no adapters)
 │       ├── auth/
 │       │   ├── __init__.py
@@ -96,8 +100,7 @@ pro-context/
 │       └── registry/
 │           ├── __init__.py
 │           ├── types.py            # Library type + registry resolver interface
-│           ├── known_libraries.py  # Curated library registry (Python initially)
-│           └── pypi_resolver.py    # PyPI version/URL resolution
+│           └── known_libraries.py  # Curated library registry (Python initially)
 ├── tests/
 │   ├── __init__.py
 │   ├── unit/
@@ -116,7 +119,7 @@ pro-context/
 │   │   │   ├── test_rate_limiter.py
 │   │   │   └── test_url_validator.py
 │   │   └── registry/
-│   │       └── test_pypi_resolver.py
+│   │       └── test_known_libraries.py
 │   ├── integration/
 │   │   ├── test_fetcher_cache.py    # Fetcher + cache integration
 │   │   ├── test_search_pipeline.py  # Fetch → chunk → index → search
@@ -493,6 +496,53 @@ class TestBM25Index:
 - **Never use `threading.Lock` in async code** — it blocks the entire event loop. Use `asyncio.Lock` instead
 - **Use `AsyncTTLCache` (not raw `cachetools.TTLCache`) for all in-memory caching** — see `src/pro_context/cache/memory.py` and technical spec Section 5.3
 
+### 3.5.1 Protocol-First Design
+
+All infrastructure components (cache, search, rate limiting, session, auth) are defined as `Protocol` classes in `src/pro_context/protocols.py` (see technical spec Section 3.5). Follow these rules:
+
+- **Depend on protocols, not implementations.** Classes like `CacheManager`, `PageCache`, and tool handlers take protocol types in their constructors — never concrete classes like `SqliteCache` or `AsyncTTLCache`.
+  ```python
+  # Correct — depends on protocol
+  from pro_context.protocols import MemoryCache, PersistentCache
+
+  class CacheManager:
+      def __init__(self, memory: MemoryCache, persistent: PersistentCache): ...
+
+  # Wrong — depends on concrete implementation
+  class CacheManager:
+      def __init__(self, memory: AsyncTTLCache, persistent: SqliteCache): ...
+  ```
+
+- **Concrete wiring happens at startup only.** The `__main__.py` entry point creates concrete implementations and passes them to constructors. No other module imports concrete infrastructure classes.
+  ```python
+  # src/pro_context/__main__.py
+  from pro_context.cache.memory import AsyncTTLCache
+  from pro_context.cache.sqlite import SqliteCache
+  from pro_context.cache.manager import CacheManager
+
+  memory = AsyncTTLCache(maxsize=500, ttl=86400)
+  persistent = SqliteCache(db_path=config.cache.directory)
+  cache_manager = CacheManager(memory=memory, persistent=persistent)
+  ```
+
+- **Tests use the same protocols.** Unit tests inject in-memory fakes or mocks satisfying the protocol — not the real SQLite implementation.
+  ```python
+  class FakeMemoryCache:
+      """In-memory dict satisfying MemoryCache protocol for tests."""
+      def __init__(self):
+          self._store = {}
+      def get(self, key): return self._store.get(key)
+      def set(self, key, value): self._store[key] = value
+      def pop(self, key, default=None): return self._store.pop(key, default)
+      async def get_or_set(self, key, fetch_fn):
+          if key in self._store: return self._store[key]
+          result = await fetch_fn()
+          self._store[key] = result
+          return result
+  ```
+
+- **No `isinstance` checks on concrete types.** If you need a type check, use the `@runtime_checkable` protocol: `isinstance(obj, MemoryCache)`.
+
 ### 3.6 Security Rules
 
 - **Always use `yaml.safe_load()`** when parsing YAML config files — never `yaml.load()`. The full loader can execute arbitrary Python via `!!python/object` tags in user-supplied config files
@@ -568,6 +618,7 @@ class TestBM25Index:
    - `.gitignore` — Ignore `.venv/`, `uv.lock` (not ignored, checked in), `__pycache__/`, etc.
 
 2. **Infrastructure**
+   - `src/pro_context/protocols.py` — Infrastructure `Protocol` definitions (MemoryCache, PersistentCache, PersistentPageCache, RateLimiter, SearchBackend, SessionStore, ApiKeyStore) per technical spec Section 3.5
    - `src/pro_context/lib/logger.py` — structlog logger setup with redaction, correlation IDs, pretty/JSON format
    - `src/pro_context/lib/errors.py` — `ProContextError` class, error code enum, factory functions for each error type
    - `src/pro_context/lib/tokens.py` — `estimate_tokens(text: str) -> int` using chars/4 approximation
@@ -835,7 +886,6 @@ class TestBM25Index:
 | Page cache | Full page store, offset slicing, hasMore | — | Nothing (use in-memory SQLite) |
 | Cache manager | Tier promotion, stale handling | Fetcher + cache flow | Network fetches |
 | llms.txt fetcher | Parse llms.txt TOC, fetch pages, handle 404 | Full fetch → cache | HTTP responses |
-| PyPI resolver | Version parsing, latest detection | — | HTTP responses |
 | API key auth | Hash validation, key format | Create → auth → revoke | Nothing (use test SQLite) |
 | Search engine | Index + query orchestration, cross-library | Fetch → chunk → index → search | HTTP responses |
 | Tool handlers | Input validation, output format | — | Core engine (mock fetcher) |

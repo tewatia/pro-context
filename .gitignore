@@ -77,9 +77,12 @@ Thumbs.db
 # Claude
 .claude/settings.local*
 
+# Notepads for personal use and for communicating ideas to Claude
 comments
+comments.txt
+comments.md
 
-# Private/commercial notes (not for public repo)
+# Private notes (not for public eyes)
 CLAUDE.local.md
 docs/private/
 docs/builder/

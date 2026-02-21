@@ -2,7 +2,7 @@
 
 > **Document**: 03-technical-spec.md
 > **Status**: Draft v2
-> **Last Updated**: 2026-02-16
+> **Last Updated**: 2026-02-20
 > **Depends on**: 02-functional-spec.md (v3)
 
 ---
@@ -18,6 +18,7 @@
   - [3.2 Cache Types](#32-cache-types)
   - [3.3 Auth Types (HTTP Mode)](#33-auth-types-http-mode)
   - [3.4 Configuration Types](#34-configuration-types)
+  - [3.5 Infrastructure Protocols](#35-infrastructure-protocols)
 - [4. Documentation Fetcher](#4-documentation-fetcher)
   - [4.1 Data Types](#41-data-types)
   - [4.2 Fetcher Implementation](#42-fetcher-implementation)
@@ -132,10 +133,9 @@ MCP Client
   │
   ├─ resolve-library("langchain")
   │    │
-  │    ├─ 1. Fuzzy match against known-libraries registry
-  │    ├─ 2. If no match → query PyPI API
-  │    ├─ 3. If still no match → return empty results
-  │    └─ 4. Return ranked matches with { libraryId, name, languages, relevance }
+  │    ├─ 1. Fuzzy match against known-libraries registry (exact pkg → ID → alias → Levenshtein)
+  │    ├─ 2. If no match → return empty results (no network calls — registry only)
+  │    └─ 3. Return ranked matches with { libraryId, name, languages, relevance }
   │
   ├─ get-library-info("langchain-ai/langchain")
   │    │
@@ -520,6 +520,151 @@ class ProContextConfig:
 # See functional spec section 12 for full env var override table
 ```
 
+### 3.5 Infrastructure Protocols
+
+All swappable infrastructure layers are defined as Python `Protocol` classes (PEP 544). Concrete implementations (SQLite, in-memory, etc.) satisfy these protocols via structural subtyping — no explicit inheritance required. This enables backend swaps (e.g., SQLite → PostgreSQL, in-memory → Redis) without changing any code that depends on the protocol.
+
+**File**: `src/pro_context/protocols.py`
+
+```python
+from typing import Any, Protocol, runtime_checkable
+from collections.abc import Callable
+
+# ===== Cache Protocols =====
+
+@runtime_checkable
+class MemoryCache(Protocol):
+    """In-memory cache with TTL and LRU eviction.
+
+    Concrete implementations:
+      - AsyncTTLCache (cachetools.TTLCache + asyncio.Lock) — default
+      - Future: Redis-backed (shared across processes)
+
+    Individual get/set ops are synchronous (atomic in asyncio's cooperative model).
+    get_or_set is async because the fetch_fn crosses an await boundary.
+    """
+
+    def get(self, key: str) -> Any | None: ...
+    def set(self, key: str, value: Any) -> None: ...
+    def pop(self, key: str, default: Any = None) -> Any: ...
+    async def get_or_set(self, key: str, fetch_fn: Callable) -> Any: ...
+
+
+@runtime_checkable
+class PersistentCache(Protocol):
+    """Persistent cache backend (Tier 2).
+
+    Concrete implementations:
+      - SqliteCache (aiosqlite, WAL mode) — default
+      - Future: PostgreSQL-backed (shared across instances)
+    """
+
+    async def get(self, key: str) -> CacheEntry | None: ...
+    async def set(self, key: str, entry: CacheEntry) -> None: ...
+    async def delete(self, key: str) -> None: ...
+    async def mark_stale(self, library_id: str) -> None: ...
+    async def cleanup_expired(self) -> int: ...
+
+
+@runtime_checkable
+class PersistentPageCache(Protocol):
+    """Persistent page cache backend (Tier 2, page-specific).
+
+    Concrete implementations:
+      - SqlitePageCache (aiosqlite) — default
+      - Future: PostgreSQL-backed
+    """
+
+    async def get(self, url: str) -> PageCacheEntry | None: ...
+    async def set(self, url: str, entry: PageCacheEntry) -> None: ...
+    async def delete(self, url: str) -> None: ...
+    async def cleanup_expired(self) -> int: ...
+
+
+# ===== Rate Limiting Protocol =====
+
+@runtime_checkable
+class RateLimiter(Protocol):
+    """Rate limiter for inbound request throttling.
+
+    Concrete implementations:
+      - TokenBucketRateLimiter (in-memory, per-process) — default
+      - Future: Redis-backed (shared across instances, Lua script for atomicity)
+    """
+
+    async def check(self, key: str) -> "RateLimitResult": ...
+    async def get_headers(self, key: str) -> dict[str, str]: ...
+
+
+@dataclass
+class RateLimitResult:
+    """Result of a rate limit check"""
+    allowed: bool  # Whether the request is allowed
+    remaining: int  # Remaining requests in current window
+    retry_after: int | None = None  # Seconds until next allowed request (if rejected)
+
+
+# ===== Search Protocol =====
+
+@runtime_checkable
+class SearchBackend(Protocol):
+    """Full-text search backend for documentation chunks.
+
+    Concrete implementations:
+      - FTS5SearchBackend (SQLite FTS5 with bm25()) — default
+      - Future: PostgreSQL tsvector + GIN index
+      - Future: Hybrid BM25 + vector search (Phase 8)
+    """
+
+    async def index(self, chunks: list["DocChunk"]) -> None: ...
+    async def search(
+        self,
+        query: str,
+        library_ids: list[str] | None = None,
+        max_results: int = 10,
+    ) -> list["SearchResult"]: ...
+    async def delete_by_library(self, library_id: str) -> None: ...
+    async def get_indexed_libraries(self) -> list[str]: ...
+
+
+# ===== Session Store Protocol =====
+
+@runtime_checkable
+class SessionStore(Protocol):
+    """Session state storage for tracking resolved libraries.
+
+    Concrete implementations:
+      - SqliteSessionStore (aiosqlite) — default
+      - Future: Redis-backed (TTL-based expiry, shared across instances)
+    """
+
+    async def add(self, library_id: str, name: str, languages: list[str]) -> None: ...
+    async def list_all(self) -> list[dict[str, Any]]: ...
+    async def clear(self) -> None: ...
+
+
+# ===== API Key Store Protocol =====
+
+@runtime_checkable
+class ApiKeyStore(Protocol):
+    """API key storage and validation for HTTP mode.
+
+    Concrete implementations:
+      - SqliteApiKeyStore (aiosqlite) — default
+      - Future: PostgreSQL-backed (shared across instances)
+    """
+
+    async def validate(self, key_hash: str) -> "ApiKey | None": ...
+    async def create(self, name: str, rate_limit: int | None = None) -> tuple[str, "ApiKey"]: ...
+    async def revoke(self, key_id: str) -> bool: ...
+    async def list_keys(self) -> list["ApiKey"]: ...
+    async def record_usage(self, key_id: str) -> None: ...
+```
+
+**Why `@runtime_checkable`?** Allows `isinstance(obj, MemoryCache)` checks in tests and dependency injection, without requiring concrete classes to inherit from the protocol.
+
+**Why protocols instead of ABCs?** Protocols use structural subtyping (duck typing with type checker support). Concrete implementations don't need to import or inherit from the protocol — they just need to have the right methods. This keeps the dependency direction clean: protocols live in `protocols.py`, concrete implementations live in `cache/`, `search/`, `auth/`, etc.
+
 ---
 
 ## 4. Documentation Fetcher
@@ -749,40 +894,46 @@ class AsyncTTLCache:
 
 # src/pro_context/cache/manager.py
 from datetime import datetime
+from pro_context.protocols import MemoryCache, PersistentCache
 
 class CacheManager:
-    """Two-tier cache orchestrator: memory (LRU+TTL) → SQLite → miss"""
+    """Two-tier cache orchestrator: memory (Tier 1) → persistent (Tier 2) → miss.
 
-    def __init__(self, memory_cache: AsyncTTLCache, sqlite_cache: SqliteCache):
-        self.memory = memory_cache
-        self.sqlite = sqlite_cache
+    Depends on MemoryCache and PersistentCache protocols (Section 3.5).
+    Default implementations: AsyncTTLCache (memory) + SqliteCache (persistent).
+    Swappable: Redis (memory) + PostgreSQL (persistent) for multi-instance deployments.
+    """
+
+    def __init__(self, memory: MemoryCache, persistent: PersistentCache):
+        self.memory = memory
+        self.persistent = persistent
 
     async def get(self, key: str) -> CacheEntry | None:
-        """Get entry from cache (memory → SQLite → miss)"""
-        # Tier 1: Memory (atomic get, no lock needed)
+        """Get entry from cache (memory → persistent → miss)"""
+        # Tier 1: Memory (atomic get, no lock needed in asyncio)
         mem_result = self.memory.get(key)
         if mem_result and not self._is_expired(mem_result):
             return mem_result
 
-        # Tier 2: SQLite
-        sql_result = await self.sqlite.get(key)
-        if sql_result and not self._is_expired(sql_result):
+        # Tier 2: Persistent backend
+        persist_result = await self.persistent.get(key)
+        if persist_result and not self._is_expired(persist_result):
             # Promote to memory cache (atomic set, no lock needed)
-            self.memory.set(key, sql_result)
-            return sql_result
+            self.memory.set(key, persist_result)
+            return persist_result
 
         # Return stale entry if exists (caller decides whether to use it)
-        return sql_result or mem_result or None
+        return persist_result or mem_result or None
 
     async def set(self, key: str, entry: CacheEntry) -> None:
         """Write to both cache tiers"""
         self.memory.set(key, entry)
-        await self.sqlite.set(key, entry)
+        await self.persistent.set(key, entry)
 
     async def invalidate(self, key: str) -> None:
         """Remove entry from both cache tiers"""
         self.memory.pop(key, None)
-        await self.sqlite.delete(key)
+        await self.persistent.delete(key)
 
     def _is_expired(self, entry: CacheEntry) -> bool:
         return datetime.now() > entry.expires_at
@@ -794,11 +945,15 @@ Pages fetched by `read-page` are cached in full. Offset-based reads serve slices
 
 ```python
 class PageCache:
-    """Page-specific cache with offset-based slice support"""
+    """Page-specific cache with offset-based slice support.
 
-    def __init__(self, memory_cache: AsyncTTLCache, sqlite_cache: SqlitePageCache):
-        self.memory = memory_cache
-        self.sqlite = sqlite_cache
+    Depends on MemoryCache and PersistentPageCache protocols (Section 3.5).
+    Default implementations: AsyncTTLCache (memory) + SqlitePageCache (persistent).
+    """
+
+    def __init__(self, memory: MemoryCache, persistent: PersistentPageCache):
+        self.memory = memory
+        self.persistent = persistent
 
     async def get_page(self, url: str) -> PageCacheEntry | None:
         """Get full page from cache (same two-tier pattern as CacheManager)"""
@@ -807,13 +962,13 @@ class PageCache:
         if mem_result and not self._is_expired(mem_result):
             return mem_result
 
-        # Tier 2: SQLite
-        sql_result = await self.sqlite.get(url)
-        if sql_result and not self._is_expired(sql_result):
-            self.memory.set(url, sql_result)
-            return sql_result
+        # Tier 2: Persistent backend
+        persist_result = await self.persistent.get(url)
+        if persist_result and not self._is_expired(persist_result):
+            self.memory.set(url, persist_result)
+            return persist_result
 
-        return sql_result or mem_result or None
+        return persist_result or mem_result or None
 
     async def get_slice(
         self, url: str, offset: int, max_tokens: int
@@ -1029,6 +1184,8 @@ pro-context update-registry
 
 ## 7. Search Engine Design
 
+All search operations go through the `SearchBackend` protocol (Section 3.5). The default implementation uses SQLite FTS5. The chunker is independent of the search backend — it produces `DocChunk` objects that any `SearchBackend` can index.
+
 ### 7.1 Document Chunking Strategy
 
 Raw documentation is chunked into focused sections for indexing and retrieval.
@@ -1112,7 +1269,7 @@ When returning results via `get-docs`, the system applies a token budget:
 
 | Tool | Cache hit | Cache miss (cold fetch) |
 |------|-----------|------------------------|
-| `resolve-library` | <10ms (registry in memory) | <200ms (PyPI API fallback) |
+| `resolve-library` | <10ms (registry in memory) | N/A — no network calls; unrecognised library returns empty result |
 | `get-library-info` | <50ms (TOC from memory/SQLite) | <3s (fetcher HTTP) |
 | `get-docs` | <100ms (chunks from SQLite + BM25) | <5s (fetch + chunk + index) |
 | `search-docs` | <200ms (BM25 query across index) | N/A (requires prior indexing) |
@@ -1172,59 +1329,134 @@ if __name__ == "__main__":
 
 ### 9.2 Streamable HTTP Transport (HTTP Mode)
 
+> **Note**: This replaces the deprecated HTTP+SSE transport from MCP spec 2024-11-05. The old `SseServerTransport` / `mcp.server.sse` is **not** used. See [MCP spec 2025-11-25 transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports.md) for the full specification.
+
+**Streamable HTTP protocol summary:**
+- Single `/mcp` endpoint supporting both `POST` (client→server messages) and `GET` (opens SSE stream for server→client)
+- `DELETE /mcp` — client signals session termination (server MAY return 405 if not supported)
+- `MCP-Session-Id` header — server assigns at initialization; client MUST include on all subsequent requests
+- `MCP-Protocol-Version` header — client MUST include on all post-initialization requests; server MUST return 400 for unsupported versions
+- FastMCP handles Streamable HTTP protocol details (session assignment, SSE framing, reconnect via `Last-Event-ID`)
+
 ```python
 # src/pro_context/__main__.py (HTTP mode)
-import asyncio
-from mcp.server import Server
-from mcp.server.sse import SseServerTransport
-from starlette.applications import Starlette
-from starlette.routing import Route
+#
+# Security requirements per MCP spec 2025-11-25:
+#   - MUST validate Origin header on all connections → 403 if present and invalid
+#     (prevents DNS rebinding attacks)
+#   - SHOULD bind to 127.0.0.1 for local deployments (not 0.0.0.0)
+#   - SHOULD implement authentication for all connections
+
+import re
+from mcp.server.fastmcp import FastMCP
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 import uvicorn
 
-async def handle_sse(request):
-    """Handle SSE MCP transport"""
-    # Auth middleware
-    if not await authenticate_request(request):
-        return JSONResponse(
-            {"code": "AUTH_REQUIRED", "message": "..."},
-            status_code=401
-        )
+# FastMCP manages Streamable HTTP transport internally (Starlette under the hood).
+# It handles MCP-Session-Id assignment, protocol version negotiation,
+# POST/GET routing to the single MCP endpoint, and SSE stream framing.
+mcp = FastMCP("pro-context")
 
-    # Rate limit middleware
-    if not await rate_limit_check(request):
-        return JSONResponse(
-            {"code": "RATE_LIMITED", "message": "..."},
-            status_code=429
-        )
+# Register tools, resources, prompts...
+# (See implementation guide for full registration code)
 
-    # Delegate to MCP transport
-    async with SseServerTransport("/messages") as transport:
-        await server.run(
-            transport.read_stream,
-            transport.write_stream,
-            server.create_initialization_options(),
-        )
+# Supported protocol versions (2025-03-26 included for backwards compatibility)
+SUPPORTED_PROTOCOL_VERSIONS = frozenset({"2025-11-25", "2025-03-26"})
 
-# Create Starlette app
-app = Starlette(routes=[Route("/sse", endpoint=handle_sse)])
+# Allowed Origin patterns for localhost deployments.
+# For remote (internet-facing) deployments: replace with allowlist of known client origins.
+_LOCALHOST_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
+
+
+class MCPSecurityMiddleware(BaseHTTPMiddleware):
+    """Security middleware enforcing MCP spec 2025-11-25 requirements.
+
+    Applied before FastMCP transport sees the request.
+    Order of checks: Origin → Protocol Version → Auth → Rate Limit
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        # 1. Origin validation — REQUIRED by MCP spec (DNS rebinding prevention).
+        #    If Origin header is present and does not match allowed origins → 403.
+        #    Response body is a JSON-RPC error with no id (as per spec).
+        origin = request.headers.get("origin")
+        if origin and not _LOCALHOST_ORIGIN.match(origin):
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": None,
+                 "error": {"code": -32000, "message": "Forbidden: invalid Origin"}},
+                status_code=403,
+            )
+
+        # 2. Protocol version validation.
+        #    Absence is allowed (backwards compat — assume 2025-03-26).
+        #    If present and unsupported → 400 Bad Request.
+        version = request.headers.get("mcp-protocol-version")
+        if version is not None and version not in SUPPORTED_PROTOCOL_VERSIONS:
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": None,
+                 "error": {"code": -32000, "message": f"Unsupported protocol version: {version}"}},
+                status_code=400,
+            )
+
+        # 3. API key authentication
+        if not await authenticate_request(request):
+            return JSONResponse(
+                {"code": "AUTH_REQUIRED", "message": "Valid API key required"},
+                status_code=401,
+            )
+
+        # 4. Rate limiting
+        rate_result = await rate_limit_check(request)
+        if not rate_result.allowed:
+            return JSONResponse(
+                {"code": "RATE_LIMITED", "message": "Rate limit exceeded"},
+                status_code=429,
+                headers={"Retry-After": str(rate_result.retry_after)},
+            )
+
+        return await call_next(request)
+
+
+# Obtain the underlying Starlette ASGI app from FastMCP.
+# FastMCP.get_asgi_app() exposes the internal Starlette app for middleware wrapping.
+# Note: If the SDK version changes this method name, consult FastMCP release notes.
+app = mcp.get_asgi_app()
+
+# Starlette middleware is applied in reverse order:
+# last added = outermost wrapper = first to run on incoming requests.
+app.add_middleware(MCPSecurityMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.security.cors["origins"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],   # DELETE: session termination signal
+    allow_headers=[
+        "Authorization",
+        "MCP-Session-Id",
+        "MCP-Protocol-Version",
+        "Last-Event-ID",    # For SSE stream resumption after disconnection
+    ],
+    expose_headers=["MCP-Session-Id"],         # Client needs to read session ID
 )
 
-# Run with uvicorn
-uvicorn.run(app, host=config.server.host, port=config.server.port)
+uvicorn.run(
+    app,
+    host=config.server.host,   # "127.0.0.1" for local, "0.0.0.0" for remote
+    port=config.server.port,
+    log_config=None,            # Disable uvicorn default logging — use structlog
+)
 ```
 
 **Characteristics:**
+- Streamable HTTP transport per MCP spec 2025-11-25 (single `/mcp` endpoint, POST + GET)
 - Requires API key authentication
-- Multi-user (concurrent connections)
+- Multi-user (concurrent connections, session-scoped via `MCP-Session-Id`)
 - Shared documentation cache across all users
-- Supports SSE transport as per MCP spec
+- Origin header validation (DNS rebinding prevention — required by MCP spec)
 - Per-key rate limiting
-- CORS configuration
+- CORS configuration with `MCP-Session-Id` header exposure
 
 ---
 
@@ -1270,11 +1502,13 @@ pro-context-admin key revoke --id <key-id>
 pro-context-admin key stats --id <key-id>
 ```
 
-The admin CLI is a separate entry point (`src/pro_context/auth/admin_cli.py`) that operates directly on the SQLite database.
+The admin CLI is a separate entry point (`src/pro_context/auth/admin_cli.py`) that operates on the `ApiKeyStore` protocol (Section 3.5). Default implementation uses SQLite directly.
 
 ---
 
 ## 11. Rate Limiting Design
+
+All rate limiting operations go through the `RateLimiter` protocol (Section 3.5). The default implementation is an in-memory token bucket. For multi-instance deployments, swap in a Redis-backed implementation satisfying the same protocol.
 
 ### 11.1 Token Bucket Algorithm
 
@@ -1386,8 +1620,6 @@ import ipaddress
 DEFAULT_ALLOWLIST = [
     "github.com",
     "raw.githubusercontent.com",
-    "pypi.org",
-    "registry.npmjs.org",
     "*.readthedocs.io",
     "*.github.io",
 ]
@@ -1530,6 +1762,8 @@ Status determination:
 
 ## 14. Database Schema
 
+This section documents the **default SQLite schema**. The concrete SQLite classes (`SqliteCache`, `SqlitePageCache`, `SqliteSessionStore`, `SqliteApiKeyStore`, `FTS5SearchBackend`) implement the protocols defined in Section 3.5. Alternative backends (PostgreSQL, Redis) implement the same protocols with their own storage schemas.
+
 ### 14.1 SQLite Tables
 
 ```sql
@@ -1645,35 +1879,14 @@ CREATE TABLE IF NOT EXISTS api_keys (
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 
--- Library metadata cache
--- Purpose: stores enriched metadata fetched from PyPI/npm at runtime for libraries
--- that were resolved via the PyPI fallback path (i.e., NOT in known-libraries.json).
--- The in-memory registry (known-libraries.json) only covers curated libraries.
--- When resolve-library falls through to PyPI, the fetched metadata is cached here
--- to avoid repeated PyPI API calls for the same library within the TTL window.
--- Libraries in known-libraries.json do NOT need entries here.
-CREATE TABLE IF NOT EXISTS library_metadata (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  description TEXT,
-  languages TEXT NOT NULL,           -- JSON array
-  package_name TEXT NOT NULL,
-  docs_url TEXT,
-  repo_url TEXT,
-  fetched_at TEXT NOT NULL,
-  expires_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_library_metadata_package ON library_metadata(package_name);
-
 -- Session state (resolved libraries in current session)
 -- Session = one MCP client connection lifetime.
 -- stdio mode: table is cleared on server startup (each process is one session).
--- HTTP mode: table is cleared per SSE connection (scoped to the connection context).
+-- HTTP mode: table is cleared per MCP session (scoped to the MCP-Session-Id lifetime).
 -- Purpose: allows tools to know which libraries have already been resolved in this
 --   session without the agent having to re-call resolve-library.
 -- Cleared by: DELETE FROM session_libraries at process start (stdio) or
---   on SSE connection teardown (HTTP mode).
+--   on MCP session teardown / expiry (HTTP mode).
 CREATE TABLE IF NOT EXISTS session_libraries (
   library_id TEXT NOT NULL PRIMARY KEY,
   name TEXT NOT NULL,
@@ -1722,7 +1935,6 @@ async def cleanup_expired_entries(db: aiosqlite.Connection) -> None:
     await db.execute("DELETE FROM doc_cache WHERE expires_at < ?", (now,))
     await db.execute("DELETE FROM page_cache WHERE expires_at < ?", (now,))
     await db.execute("DELETE FROM toc_cache WHERE expires_at < ?", (now,))
-    await db.execute("DELETE FROM library_metadata WHERE expires_at < ?", (now,))
     await db.commit()
     # FTS5 content sync handled by triggers
 ```

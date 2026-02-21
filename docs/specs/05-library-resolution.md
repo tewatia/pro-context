@@ -637,7 +637,7 @@ A build script (not part of the runtime server) generates the registry. This is 
    d. Validate each llms.txt URL (HEAD request + content check)
    e. Create initial DocSource entries from validated entries
 
-2. Fetch top-pypi-packages (community: top 1,000; enterprise: top 5,000)
+2. Fetch top-pypi-packages (default: top 1,000)
    Source: hugovk/top-pypi-packages monthly snapshot
 
 3. For each package:

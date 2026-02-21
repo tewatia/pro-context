@@ -134,20 +134,11 @@ The existing `docs/specs/` documents were reviewed against a standard pre-implem
 
 ---
 
-### 3.4 Formal API Reference
+### 3.4 Formal API Reference — ✅ RESOLVED
 
-**Why needed:** The MCP tools are documented inline in `02-functional-spec.md` but not as a standalone, versioned contract. As the project evolves, there's no single source of truth for the external interface.
+**Resolved by:** `docs/specs/06-api-reference.md` (created 2026-02-20)
 
-**Should include:**
-- All 5 MCP tools: full input schema, output schema, error codes, and examples
-- 2 MCP resources: URIs, content types, update frequency
-- 3 prompt templates: input variables, output format, use cases
-- HTTP API endpoints (for HTTP mode): OpenAPI/Swagger specification
-- Breaking change policy: when will the API change, how will clients be notified
-- Versioning strategy: how versions are communicated to MCP clients
-- Deprecation policy: how long deprecated tools/parameters are kept
-
-**Suggested filename:** `docs/specs/10-api-reference.md` + `openapi.yaml` (for HTTP mode)
+Covers: Server identity/capabilities, 5 MCP tool definitions with full JSON-RPC wire format (inputSchema, outputSchema, examples), 2 resources with URI scheme and read responses, 3 prompt templates with argument definitions and example messages, protocol vs tool execution error handling, HTTP mode API (auth, rate limiting, CORS), versioning and deprecation policy. Aligned with MCP specification v2025-11-25 (Streamable HTTP transport, structured content, tool annotations).
 
 ---
 
@@ -189,12 +180,12 @@ The existing `docs/specs/` documents were reviewed against a standard pre-implem
 
 | Missing Component | Why It Matters |
 |---|---|
-| **Definition of done per phase** | What criteria must be met for Phase N to be considered complete? Who approves completion? What is the rollback plan if a phase is partially shipped? |
-| **Performance testing strategy** | Load testing scenarios, stress testing, and how to detect performance regressions between phases. |
-| **Integration testing with real MCP clients** | How will Pro-Context be tested against actual clients (Claude Code, Cursor, Windsurf)? What is the test environment setup? |
-| **How to mock external dependencies** | PyPI API, GitHub API, and llms.txt sources need to be mockable for reliable CI. No strategy is defined. |
-| **Code review process** | Who reviews PRs? What are the review criteria? What is the approval requirement? |
-| **Pre-production checklist** | Security audit complete, performance benchmarks met, documentation updated, user acceptance testing passed. |
+| ~~**Definition of done per phase**~~ | ~~What criteria must be met for Phase N to be considered complete? Who approves completion? What is the rollback plan if a phase is partially shipped?~~ ✅ Resolved in `docs/specs/07-testing-and-qa.md` Section 4 (2026-02-20) |
+| ~~**Performance testing strategy**~~ | ~~Load testing scenarios, stress testing, and how to detect performance regressions between phases.~~ ✅ Resolved in `docs/specs/07-testing-and-qa.md` Section 1.3 (2026-02-20) |
+| ~~**Integration testing with real MCP clients**~~ | ~~How will Pro-Context be tested against actual clients (Claude Code, Cursor, Windsurf)? What is the test environment setup?~~ ✅ Resolved in `docs/specs/07-testing-and-qa.md` Section 1.4 (2026-02-20) |
+| ~~**How to mock external dependencies**~~ | ~~PyPI API, GitHub API, and llms.txt sources need to be mockable for reliable CI. No strategy is defined.~~ ✅ Resolved in `docs/specs/07-testing-and-qa.md` Section 1.2 (2026-02-20) |
+| ~~**Code review process**~~ | ~~Who reviews PRs? What are the review criteria? What is the approval requirement?~~ ✅ Resolved in `docs/specs/07-testing-and-qa.md` Section 3 (2026-02-20) |
+| ~~**Pre-production checklist**~~ | ~~Security audit complete, performance benchmarks met, documentation updated, user acceptance testing passed.~~ ✅ Resolved in `docs/specs/07-testing-and-qa.md` Section 4.2 (2026-02-20) |
 | **Post-launch support plan** | Bug triage process, feature request handling, community support channels. |
 | **Version pinning strategy** | The dependency table uses "latest" for the MCP SDK, which is not a valid version specifier. All dependencies need SemVer-compatible ranges in `pyproject.toml` and a `requirements.txt` lock file for reproducible builds. *(See plan file for full analysis and recommended `pyproject.toml`.)* |
 
@@ -233,7 +224,7 @@ The existing `docs/specs/` documents were reviewed against a standard pre-implem
 | Add FTS5 sync triggers to database schema | `03-technical-spec.md`, Section 14.1 | Without these, all BM25 search returns zero results — core functionality is broken |
 | Define performance targets (latency SLOs) per tool | `03-technical-spec.md` | Without targets, performance testing has no pass/fail criteria |
 | Add version pinning strategy and update dependency table | `04-implementation-guide.md` | "latest" for MCP SDK causes non-reproducible builds |
-| Add definition of done for each phase | `04-implementation-guide.md` | Needed to know when a phase is complete and safe to proceed |
+| ~~Add definition of done for each phase~~ | ~~`04-implementation-guide.md`~~ | ✅ Resolved in `docs/specs/07-testing-and-qa.md` Section 4 (2026-02-20) |
 | Create security threat model | New: `docs/specs/09-security-spec.md` | Threats must be identified before writing security-sensitive code |
 | Add rate limiting strategy to registry build script | `06-registry-build-system.md` | Without this, the build pipeline risks IP bans on first run |
 
@@ -241,7 +232,7 @@ The existing `docs/specs/` documents were reviewed against a standard pre-implem
 
 | Item | Location | Rationale |
 |---|---|---|
-| Create formal API reference | New: `docs/specs/10-api-reference.md` | HTTP mode users need a contract; OpenAPI spec needed for clients |
+| ~~Create formal API reference~~ | ~~`docs/specs/06-api-reference.md`~~ | ✅ Resolved (2026-02-20) |
 | Create administrator guide | New: `docs/specs/08-user-documentation.md` | HTTP mode requires deployment documentation |
 | Define monitoring and alerting specification | `03-technical-spec.md` or new ops doc | Production deployments need observable systems |
 | Document horizontal scaling limitations explicitly | `03-technical-spec.md` | Operators deploying HTTP mode need to understand single-instance constraint |
