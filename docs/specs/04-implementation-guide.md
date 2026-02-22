@@ -2,7 +2,7 @@
 
 > **Document**: 04-implementation-guide.md
 > **Status**: Draft v2
-> **Last Updated**: 2026-02-21
+> **Last Updated**: 2026-02-22
 > **Depends on**: 03-technical-spec.md (v2)
 
 ---
@@ -82,7 +82,7 @@ pro-context/
 │       │   ├── __init__.py
 │       │   ├── memory.py           # TTL in-memory cache wrapper (cachetools)
 │       │   ├── sqlite.py           # SQLite persistent cache operations (aiosqlite)
-│       │   ├── page_cache.py       # Page cache with offset-based slice support
+│       │   ├── page_cache.py       # Page cache with line-based slice support
 │       │   └── manager.py          # Two-tier cache orchestrator
 │       ├── search/
 │       │   ├── __init__.py
@@ -411,7 +411,7 @@ def library_not_found(query: str, suggestion: str | None = None) -> ProContextEr
         suggestion=(
             f"Did you mean '{suggestion}'? "
             if suggestion
-            else "Check spelling, wait for next registry update, or add via custom sources config"
+            else "Check spelling or wait for next registry update"
         ),
         details={"query": query, "suggestion": suggestion}
     )
@@ -513,17 +513,31 @@ All infrastructure components (cache, search, rate limiting, session, auth) are 
       def __init__(self, memory: AsyncTTLCache, persistent: SqliteCache): ...
   ```
 
-- **Concrete wiring happens at startup only.** The `__main__.py` entry point creates concrete implementations and passes them to constructors. No other module imports concrete infrastructure classes.
+- **Concrete wiring happens at startup only.** The `__main__.py` entry point reads `config.backends` and uses a config-driven factory to create concrete implementations. No other module imports concrete infrastructure classes.
   ```python
   # src/pro_context/__main__.py
   from pro_context.cache.memory import AsyncTTLCache
   from pro_context.cache.sqlite import SqliteCache
   from pro_context.cache.manager import CacheManager
 
-  memory = AsyncTTLCache(maxsize=500, ttl=86400)
-  persistent = SqliteCache(db_path=config.cache.directory)
+  # Backend registries — map config strings to concrete classes.
+  # Each backend module is imported here (and only here).
+  MEMORY_CACHE_BACKENDS = {
+      "cachetools": lambda cfg: AsyncTTLCache(maxsize=cfg.cache.max_memory_entries,
+                                               ttl=cfg.cache.default_ttl_hours * 3600),
+      # "redis": lambda cfg: RedisMemoryCache(url=cfg.backends.redis_url),
+  }
+  PERSISTENT_CACHE_BACKENDS = {
+      "sqlite": lambda cfg: SqliteCache(db_path=cfg.cache.directory),
+      # "postgresql": lambda cfg: PostgresCache(url=cfg.backends.postgresql_url),
+  }
+
+  # Factory reads config.backends and creates the right implementation
+  memory = MEMORY_CACHE_BACKENDS[config.backends.memory_cache](config)
+  persistent = PERSISTENT_CACHE_BACKENDS[config.backends.persistent_cache](config)
   cache_manager = CacheManager(memory=memory, persistent=persistent)
   ```
+  The commented-out lines show where Phase 4+ adds Redis/PostgreSQL backends — just uncomment and install the dependency. The same pattern applies to `SEARCH_BACKENDS`, `RATE_LIMITER_BACKENDS`, and `SESSION_STORE_BACKENDS`.
 
 - **Tests use the same protocols.** Unit tests inject in-memory fakes or mocks satisfying the protocol — not the real SQLite implementation.
   ```python
@@ -574,7 +588,7 @@ All infrastructure components (cache, search, rate limiting, session, auth) are 
 #### Files to Create
 
 1. **Build script**
-   - `scripts/build_registry.py` — Main build script (see 05-library-resolution.md Section 6.2 for full algorithm)
+   - `scripts/build_registry.py` — Main build script (see `docs/builder/05-discovery-pipeline.md` for full algorithm)
    - `scripts/utils/pypi_client.py` — PyPI JSON API client (GET /pypi/{name}/json)
    - `scripts/utils/llms_txt_validator.py` — Content validation (HTTP status, Content-Type, HTML detection, markdown header check)
    - `scripts/utils/hub_resolver.py` — Hub link following (detect and resolve hub llms.txt files)
@@ -724,9 +738,9 @@ All infrastructure components (cache, search, rate limiting, session, auth) are 
 
 ### Phase 3: Search & Navigation
 
-**Goal**: Document chunking, BM25 search indexing, `search-docs` tool (cross-library), `read-page` tool (offset-based reading), page cache.
+**Goal**: Document chunking, BM25 search indexing, `search-docs` tool (cross-library), `read-page` tool (line-based reading), page cache.
 
-**Verification gate**: Search returns relevant results across libraries; read-page supports offset-based reading of large pages.
+**Verification gate**: Search returns relevant results across libraries; read-page supports line-based reading of large pages.
 
 #### Files to Create (in order)
 
@@ -736,11 +750,11 @@ All infrastructure components (cache, search, rate limiting, session, auth) are 
    - `src/pro_context/search/engine.py` — Search engine orchestrator: index management, query execution, cross-library search, result formatting
 
 2. **Page Cache**
-   - `src/pro_context/cache/page_cache.py` — Page cache with offset-based slice support (see technical spec 5.4)
+   - `src/pro_context/cache/page_cache.py` — Page cache with line-based slice support (see technical spec 5.4)
 
 3. **Tools**
    - `src/pro_context/tools/search_docs.py` — Search indexed docs, optional library scoping, JIT indexing trigger
-   - `src/pro_context/tools/read_page.py` — Fetch page, cache full content, serve slices with offset/maxTokens, URL allowlist validation
+   - `src/pro_context/tools/read_page.py` — Fetch page, cache full content, serve line slices with offset/maxLines, URL allowlist validation
 
 4. **Update get-docs**
    - Update `src/pro_context/tools/get_docs.py` — Integrate chunker: fetch raw docs → chunk → rank by topic across libraries → return best chunks within token budget
@@ -763,7 +777,7 @@ All infrastructure components (cache, search, rate limiting, session, auth) are 
 - [ ] BM25 ranks exact keyword matches higher than tangential mentions
 - [ ] `read-page({url: "https://..."})` returns page content with position metadata
 - [ ] `read-page({url: "https://...", offset: 1000})` returns content from offset position
-- [ ] `hasMore` is true when content remains beyond offset + maxTokens
+- [ ] `hasMore` is true when content remains beyond offset + maxLines
 - [ ] Pages are cached: second read-page call for same URL is served from cache
 - [ ] URL allowlist blocks non-documentation URLs
 - [ ] `get-docs` now returns focused chunks (not raw full docs)
@@ -1033,8 +1047,9 @@ services:
       - PRO_CONTEXT_TRANSPORT=http
       - PRO_CONTEXT_PORT=3100
       - PRO_CONTEXT_LOG_LEVEL=info
-      # Optional: GitHub token for higher rate limits
-      # - PRO_CONTEXT_GITHUB_TOKEN=ghp_xxx
+      # Optional: external backends for multi-user deployment
+      # - PRO_CONTEXT_REDIS_URL=redis://redis:6379/0
+      # - PRO_CONTEXT_POSTGRESQL_URL=postgresql://user:pass@db/procontext
 
 volumes:
   pro-context-cache:

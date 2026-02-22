@@ -34,13 +34,12 @@ Ankur has recently been working with Generative AI-based applications. Since thi
 
 **Current state**: The project is in the specification/design phase. There is no source code yet — only design documents in `docs/specs/`. **You are not allowed to write any code until the design phase is complete.** The design phase will be considered complete when all the documents are finalized and approved by Ankur.
 
-All implementation decisions are captured in these seven spec documents, which are the authoritative design source. Additionally, the builder system (data engineering pipeline) is documented separately in `docs/builder/`.
+All implementation decisions are captured in these six spec documents, which are the authoritative design source. Additionally, the builder system (data engineering pipeline) is documented separately in `docs/builder/`.
 
 - `docs/specs/01-competitive-analysis.md` — Market analysis and key insight: query understanding is the accuracy bottleneck
 - `docs/specs/02-functional-spec.md` — Problem statement, 5 MCP tools, 2 resources, 3 prompt templates, documentation fetching, security model
-- `docs/specs/03-technical-spec.md` — System architecture, data models, two-tier cache, BM25 search, database schema (6 SQLite tables)
+- `docs/specs/03-technical-spec.md` — System architecture, library resolution (registry schema, in-memory indexes, 5-step algorithm, edge cases), data models, two-tier cache, BM25 search, database schema (6 SQLite tables)
 - `docs/specs/04-implementation-guide.md` — Project structure, dependencies, coding conventions, 6 implementation phases (0-5), testing strategy
-- `docs/specs/05-library-resolution.md` — Library name → documentation source mapping, runtime resolution algorithm (6 steps), simplified registry schema (builder guarantee)
 - `docs/specs/06-api-reference.md` — Formal MCP API reference: server capabilities, 5 tool definitions (JSON-RPC wire format), 2 resources, 3 prompts, error handling, HTTP mode API, versioning policy. Aligned with MCP spec v2025-11-25
 - `docs/specs/07-testing-and-qa.md` — Testing strategy (mocking with respx, performance benchmarks, MCP client compatibility), CI pipeline design, code review and PR workflow, definition of done per phase
 
@@ -55,12 +54,6 @@ The registry builder system is documented separately (data engineering vs data s
 - `docs/builder/05-discovery-pipeline.md` — PyPI collection, llms.txt probing (10+ URL patterns), GitHub fallback
 - `docs/builder/06-normalization.md` — Converting all sources to llms.txt format, TOC generation
 - `docs/builder/07-deployment.md` — GitHub Actions, GitHub Pages, monitoring, incremental updates
-
-### Reference Documents
-
-Deep-dive explanations of specific implementation areas (supplement to the specs):
-
-- `docs/reference/cache-strategy.md` — Complete caching strategy: two-tier design (AsyncTTLCache + SQLite), three cache domains, stale-while-revalidate, ETag/Last-Modified freshness checking, cache invalidation signals, read/write flows
 
 ### Research Documents
 

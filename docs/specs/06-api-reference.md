@@ -2,7 +2,7 @@
 
 > **Document**: 06-api-reference.md
 > **Status**: Draft v1
-> **Last Updated**: 2026-02-20
+> **Last Updated**: 2026-02-22
 > **MCP Protocol Version**: 2025-11-25
 > **Depends on**: 02-functional-spec.md, 03-technical-spec.md
 
@@ -528,7 +528,7 @@ The **fast path** tool. Retrieves focused documentation for a topic using server
 #### Side Effects
 
 - Fetches, chunks, and indexes library documentation (if not cached).
-- Stores results in both memory and SQLite caches.
+- Stores results in both memory and persistent caches.
 - Background refresh triggered if cache entry is stale.
 
 ---
@@ -652,7 +652,7 @@ Searches across indexed documentation. Returns ranked results with snippets and 
 
 ### 3.5 `read-page`
 
-The **navigation path** tool. Fetches a specific documentation page and returns its content as markdown. Supports offset-based reading for long pages.
+The **navigation path** tool. Fetches a specific documentation page and returns its content as markdown. Supports line-based pagination for long pages.
 
 #### Tool Definition
 
@@ -660,7 +660,7 @@ The **navigation path** tool. Fetches a specific documentation page and returns 
 {
   "name": "read-page",
   "title": "Read Documentation Page",
-  "description": "Fetches a specific documentation page URL and returns clean markdown content. Supports offset-based reading for long pages — use offset and maxTokens to paginate. URLs must come from a resolved TOC, search result, relatedPages entry, or configured allowlist.",
+  "description": "Fetches a specific documentation page URL and returns clean markdown content. Supports line-based pagination for long pages — use offset and maxLines to paginate. URLs must come from a resolved TOC, search result, relatedPages entry, or configured allowlist.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -669,16 +669,16 @@ The **navigation path** tool. Fetches a specific documentation page and returns 
         "format": "uri",
         "description": "Documentation page URL to fetch. Must be from a resolved library's TOC, a search result, or a relatedPages entry."
       },
-      "maxTokens": {
+      "maxLines": {
         "type": "number",
-        "description": "Maximum tokens to return.",
-        "default": 10000,
-        "minimum": 500,
-        "maximum": 50000
+        "description": "Maximum number of lines to return.",
+        "default": 200,
+        "minimum": 1,
+        "maximum": 5000
       },
       "offset": {
         "type": "number",
-        "description": "Token offset to start reading from. Use to continue reading a truncated page. Set to previous offset + tokensReturned.",
+        "description": "Line number to start reading from (0-based). Use to continue reading a truncated page. Set to previous offset + linesReturned.",
         "default": 0,
         "minimum": 0
       }
@@ -692,13 +692,13 @@ The **navigation path** tool. Fetches a specific documentation page and returns 
       "content": { "type": "string" },
       "title": { "type": "string" },
       "url": { "type": "string", "format": "uri" },
-      "totalTokens": { "type": "number" },
+      "totalLines": { "type": "number" },
       "offset": { "type": "number" },
-      "tokensReturned": { "type": "number" },
+      "linesReturned": { "type": "number" },
       "hasMore": { "type": "boolean" },
       "cached": { "type": "boolean" }
     },
-    "required": ["content", "title", "url", "totalTokens", "offset", "tokensReturned", "hasMore", "cached"]
+    "required": ["content", "title", "url", "totalLines", "offset", "linesReturned", "hasMore", "cached"]
   },
   "annotations": {
     "title": "Read Page",
@@ -719,7 +719,7 @@ The **navigation path** tool. Fetches a specific documentation page and returns 
     "name": "read-page",
     "arguments": {
       "url": "https://docs.langchain.com/docs/concepts/chat_models",
-      "maxTokens": 5000,
+      "maxLines": 200,
       "offset": 0
     }
   }
@@ -736,16 +736,16 @@ The **navigation path** tool. Fetches a specific documentation page and returns 
     "content": [
       {
         "type": "text",
-        "text": "{\"content\":\"# Chat Models\\n\\nChat models are a core component of LangChain...\\n\",\"title\":\"Chat Models\",\"url\":\"https://docs.langchain.com/docs/concepts/chat_models\",\"totalTokens\":8200,\"offset\":0,\"tokensReturned\":5000,\"hasMore\":true,\"cached\":false}"
+        "text": "{\"content\":\"# Chat Models\\n\\nChat models are a core component of LangChain...\\n\",\"title\":\"Chat Models\",\"url\":\"https://docs.langchain.com/docs/concepts/chat_models\",\"totalLines\":450,\"offset\":0,\"linesReturned\":200,\"hasMore\":true,\"cached\":false}"
       }
     ],
     "structuredContent": {
       "content": "# Chat Models\n\nChat models are a core component of LangChain...\n",
       "title": "Chat Models",
       "url": "https://docs.langchain.com/docs/concepts/chat_models",
-      "totalTokens": 8200,
+      "totalLines": 450,
       "offset": 0,
-      "tokensReturned": 5000,
+      "linesReturned": 200,
       "hasMore": true,
       "cached": false
     }
@@ -755,7 +755,7 @@ The **navigation path** tool. Fetches a specific documentation page and returns 
 
 #### Example Continuation Request
 
-When `hasMore` is `true`, the client calls again with `offset` = previous `offset` + `tokensReturned`:
+When `hasMore` is `true`, the client calls again with `offset` = previous `offset` + `linesReturned`:
 
 ```json
 {
@@ -766,8 +766,8 @@ When `hasMore` is `true`, the client calls again with `offset` = previous `offse
     "name": "read-page",
     "arguments": {
       "url": "https://docs.langchain.com/docs/concepts/chat_models",
-      "maxTokens": 5000,
-      "offset": 5000
+      "maxLines": 200,
+      "offset": 200
     }
   }
 }
@@ -775,7 +775,7 @@ When `hasMore` is `true`, the client calls again with `offset` = previous `offse
 
 #### Side Effects
 
-- Fetches and caches the full page (if not cached). Subsequent offset reads are served from cache.
+- Fetches and caches the full page (if not cached). Subsequent line-offset reads are served from cache.
 - Indexes page content for BM25 search (background).
 - URL must pass the allowlist check (see Technical Spec Section 12.2). Redirect targets are also validated.
 
@@ -816,7 +816,7 @@ Server health and cache status. Available in both stdio and HTTP modes.
       {
         "uri": "pro-context://health",
         "mimeType": "application/json",
-        "text": "{\"status\":\"healthy\",\"uptime\":3600,\"cache\":{\"memoryEntries\":142,\"sqliteEntries\":1024,\"hitRate\":0.87},\"fetcher\":{\"status\":\"available\",\"lastSuccess\":\"2026-02-20T10:30:00Z\",\"errorCount\":0,\"successRate\":0.98},\"version\":\"0.1.0\"}"
+        "text": "{\"status\":\"healthy\",\"uptime\":3600,\"cache\":{\"memoryEntries\":142,\"persistentEntries\":1024,\"hitRate\":0.87},\"fetcher\":{\"status\":\"available\",\"lastSuccess\":\"2026-02-20T10:30:00Z\",\"errorCount\":0,\"successRate\":0.98},\"version\":\"0.1.0\"}"
       }
     ]
   }
@@ -1081,10 +1081,10 @@ Application-level errors returned as tool results with `isError: true`. These ar
 | `LIBRARY_NOT_FOUND` | Yes | Unknown library ID | "Did you mean '{closest}'? Use resolve-library to discover libraries." |
 | `TOPIC_NOT_FOUND` | Yes | BM25 search returns no results | "Try search-docs for broader results, or browse the TOC via get-library-info." |
 | `PAGE_NOT_FOUND` | No | `read-page` URL returns HTTP 404 | "Check the URL or use get-library-info to refresh the TOC." |
-| `URL_NOT_ALLOWED` | Yes | `read-page` URL fails allowlist | "Resolve the library first with get-library-info, or add the domain to your config." |
+| `URL_NOT_ALLOWED` | Yes | `read-page` URL fails allowlist | "Resolve the library first with get-library-info — its llms.txt URLs are auto-added to the allowlist." |
 | `INVALID_CONTENT` | No | Fetched URL is not documentation | "URL does not appear to contain documentation." |
-| `SOURCE_UNAVAILABLE` | Varies | All fetchers fail, no cache | "Try again later." |
-| `NETWORK_FETCH_FAILED` | Yes | Network/timeout errors, all fetchers | "Network error. Retry in a few seconds." |
+| `SOURCE_UNAVAILABLE` | Varies | Fetch fails and no cache available | "Try again later." |
+| `NETWORK_FETCH_FAILED` | Yes | Network/timeout error fetching llms.txt or page | "Network error. Retry in a few seconds." |
 | `LLMS_TXT_NOT_FOUND` | No | Library's llms.txt URL returns 404 | "Documentation source not found. The library may have changed its URL." |
 | `STALE_CACHE_EXPIRED` | No | Stale cache exceeded 7-day max age | "Cached content has expired. A fresh fetch is required." |
 | `RATE_LIMITED` | Yes | Token bucket exhausted (HTTP mode) | "Try again after {retryAfter} seconds." |
@@ -1150,7 +1150,7 @@ Production deployments should restrict this to specific origins.
 
 Pro-Context targets **MCP protocol version `2025-11-25`**. The server includes this in its `InitializeResult` and expects clients to send it in the `MCP-Protocol-Version` header (HTTP mode).
 
-If a client requests an older protocol version, the server responds with `2025-11-25` — the only version it supports. If the client cannot accept this, it should disconnect.
+The server also accepts `2025-03-26` for backwards compatibility (see Technical Spec Section 9.2). If a client requests an unsupported protocol version, the server responds with HTTP 400.
 
 ### 8.2 Server Version
 

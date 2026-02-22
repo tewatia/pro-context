@@ -44,7 +44,6 @@
 - [8. Documentation Fetching](#8-documentation-fetching)
   - [8.1 Fetching Flow](#81-fetching-flow)
   - [8.2 Custom Documentation Sources](#82-custom-documentation-sources)
-  - [8.3 Custom Sources](#83-custom-sources)
 - [9. Security](#9-security)
   - [9.1 URL Allowlist (SSRF Prevention)](#91-url-allowlist-ssrf-prevention)
   - [9.2 Input Validation](#92-input-validation)
@@ -337,15 +336,7 @@ Discovers libraries matching a natural language query. This is a pure discovery 
 
 **If library not in registry**: Users have two options:
 
-1. **Custom sources config** — Add the library immediately via configuration:
-   ```yaml
-   sources:
-     custom:
-       - name: "my-new-lib"
-         library_id: "author/my-new-lib"
-         type: "url"
-         url: "https://docs.mynewlib.com/llms.txt"
-   ```
+1. **Add to `manual_overrides.yaml`** — Add the library to the builder's manual overrides file and trigger a registry rebuild (see `docs/builder/05-discovery-pipeline.md`)
 2. **Submit a PR** — Request addition to the curated registry for all users
 
 **Error cases:**
@@ -721,7 +712,7 @@ The `searchedLibraries` field indicates which libraries had indexed content at q
 
 ### 5.5 `read-page`
 
-The **navigation path** tool. Fetches a specific documentation page URL and returns its content as markdown. Supports offset-based reading for long pages.
+The **navigation path** tool. Fetches a specific documentation page URL and returns its content as markdown. Supports line-based reading for long pages.
 
 **Input Schema:**
 
@@ -733,16 +724,16 @@ The **navigation path** tool. Fetches a specific documentation page URL and retu
       "type": "string",
       "description": "Documentation page URL to fetch. Must be from a resolved library's TOC, a search result, or a relatedPages entry."
     },
-    "maxTokens": {
+    "maxLines": {
       "type": "number",
-      "description": "Maximum tokens to return. Default: 10000.",
-      "default": 10000,
-      "minimum": 500,
-      "maximum": 50000
+      "description": "Maximum number of lines to return. Default: 200.",
+      "default": 200,
+      "minimum": 1,
+      "maximum": 5000
     },
     "offset": {
       "type": "number",
-      "description": "Token offset to start reading from. Use this to continue reading a previously truncated page. Default: 0 (start of page).",
+      "description": "Line number to start reading from (0-based). Use this to continue reading a previously truncated page. Default: 0 (start of page).",
       "default": 0,
       "minimum": 0
     }
@@ -769,21 +760,21 @@ The **navigation path** tool. Fetches a specific documentation page URL and retu
       "type": "string",
       "description": "Canonical URL of the fetched page"
     },
-    "totalTokens": {
+    "totalLines": {
       "type": "number",
-      "description": "Total page content length in estimated tokens"
+      "description": "Total number of lines in the full page"
     },
     "offset": {
       "type": "number",
-      "description": "Token offset this response starts from"
+      "description": "Line number this response starts from (0-based)"
     },
-    "tokensReturned": {
+    "linesReturned": {
       "type": "number",
-      "description": "Number of tokens in this response"
+      "description": "Number of lines in this response"
     },
     "hasMore": {
       "type": "boolean",
-      "description": "Whether more content exists beyond this response. If true, call read-page again with offset = offset + tokensReturned."
+      "description": "Whether more content exists beyond this response. If true, call read-page again with offset = offset + linesReturned."
     },
     "cached": {
       "type": "boolean",
@@ -797,15 +788,15 @@ The **navigation path** tool. Fetches a specific documentation page URL and retu
 
 1. Validate URL against the allowlist (see Security, Section 9)
 2. Check page cache for this URL
-3. If cached → serve from cache (applying offset/maxTokens)
+3. If cached → serve from cache (applying offset/maxLines)
 4. If not cached → fetch the URL, convert to markdown if needed, cache the full page
-5. Apply offset: skip to the specified token position
-6. Apply maxTokens: return up to `maxTokens` tokens from the offset position
-7. Set `hasMore` to true if content remains beyond offset + maxTokens
+5. Apply offset: skip to the specified line number
+6. Apply maxLines: return up to `maxLines` lines from the offset position
+7. Set `hasMore` to true if content remains beyond offset + maxLines
 8. Index the page content for BM25 search (background)
-9. Return content with position metadata
+9. Return content with line metadata
 
-**Offset-based reading**: When a page exceeds `maxTokens`, the response includes `hasMore: true` and position metadata. The agent can call `read-page` again with `offset` set to `offset + tokensReturned` to continue reading. The server caches the full page on first fetch, so subsequent offset reads are served from cache without re-fetching.
+**Line-based reading**: When a page exceeds `maxLines`, the response includes `hasMore: true` and line metadata. The agent can call `read-page` again with `offset` set to `offset + linesReturned` to continue reading. The server caches the full page on first fetch, so subsequent reads are served from cache without re-fetching. This uses the same deterministic line-based pagination as standard file reading tools.
 
 **URL allowlist**: `read-page` does not fetch arbitrary URLs. It only fetches URLs that:
 
@@ -822,7 +813,7 @@ This prevents SSRF while allowing flexible navigation within documentation.
 - URL not in allowlist → `URL_NOT_ALLOWED` with suggestion to resolve the library first
 - URL returns 404 → `PAGE_NOT_FOUND`
 - URL returns non-documentation content → `INVALID_CONTENT`
-- Offset beyond content length → empty content with `hasMore: false`
+- Offset beyond total line count → empty content with `hasMore: false`
 
 ---
 
@@ -1079,9 +1070,8 @@ Custom entries are merged with the official registry at startup. They must provi
 
 **Default allowlist:**
 
-- `github.com`, `raw.githubusercontent.com`
-- `*.github.io`
-- `pypi.org`, `registry.npmjs.org`
+- `github.com`, `raw.githubusercontent.com` (registry downloads, builder-hosted llms.txt)
+- `*.github.io` (GitHub Pages-hosted documentation)
 - `*.readthedocs.io`
 - Documentation domains from the known-libraries registry
 - Domains from any llms.txt file the server has fetched
@@ -1095,7 +1085,7 @@ Custom entries are merged with the official registry at startup. They must provi
 **Dynamic allowlist expansion:**
 When the server fetches an llms.txt file, all URLs in that file are added to the session allowlist. This means if LangChain's llms.txt links to `docs.langchain.com/some/page`, that URL becomes fetchable via `read-page` — without the user needing to configure it.
 
-Custom source domains from config are also added to the allowlist.
+Domains from `custom-libraries.json` entries are also added to the allowlist at startup.
 
 ### 9.2 Input Validation
 
@@ -1223,14 +1213,15 @@ cache:
   defaultTTLHours: 24
   cleanupIntervalMinutes: 60
 
-# Documentation sources
-sources:
-  llmsTxt:
-    enabled: true
-  github:
-    enabled: true
-    token: "" # GitHub PAT (optional, increases rate limit from 60 to 5000/hr)
-  custom: []
+# Infrastructure backends (default: all embedded, no external services)
+backends:
+  memoryCache: cachetools       # or "redis"
+  persistentCache: sqlite       # or "postgresql"
+  search: sqlite_fts5           # or "postgresql_fts"
+  rateLimiter: memory           # or "redis"
+  sessionStore: sqlite          # or "redis"
+  # redisUrl: "redis://localhost:6379/0"
+  # postgresqlUrl: "postgresql://user:pass@localhost/procontext"
 
 # Per-library overrides
 libraryOverrides:
@@ -1265,7 +1256,8 @@ security:
 | `server.transport`     | `PRO_CONTEXT_TRANSPORT`    | `http`                      |
 | `server.port`          | `PRO_CONTEXT_PORT`         | `3100`                      |
 | `cache.directory`      | `PRO_CONTEXT_CACHE_DIR`    | `/data/cache`               |
-| `sources.github.token` | `PRO_CONTEXT_GITHUB_TOKEN` | `ghp_xxx`                   |
+| `backends.redis_url`   | `PRO_CONTEXT_REDIS_URL`    | `redis://localhost:6379/0`  |
+| `backends.postgresql_url` | `PRO_CONTEXT_POSTGRESQL_URL` | `postgresql://user:pass@host/db` |
 | `logging.level`        | `PRO_CONTEXT_LOG_LEVEL`    | `debug`                     |
 | —                      | `PRO_CONTEXT_DEBUG=true`   | Shorthand for `debug` level |
 
@@ -1348,11 +1340,11 @@ New documentation sources are added in the builder system (see `docs/builder/`):
 
 **Rationale**: llms.txt files contain curated links to documentation pages. These links are trustworthy because they come from the library's official documentation site. Automatically allowing them means the agent can navigate any page referenced in the TOC without the user needing to configure domains manually. This is essential for the navigation path to work without friction.
 
-### D7: `read-page` supports offset-based reading
+### D7: `read-page` uses line-based pagination
 
-**Decision**: `read-page` accepts an `offset` parameter for progressive reading of long pages, with the server caching the full page on first fetch.
+**Decision**: `read-page` accepts `offset` (line number) and `maxLines` parameters for progressive reading of long pages, with the server caching the full page on first fetch.
 
-**Rationale**: Some documentation pages exceed reasonable context budgets (10K+ tokens). Without offset support, the agent would either need to raise `maxTokens` (wasting context on content it has already seen) or miss the later portions of the page entirely. Offset-based reading lets the agent "scroll" through long pages efficiently. The server caches the full page on first fetch, so offset reads are served from cache without re-fetching. This aligns with the competitive analysis finding that modern agents can read progressively, like humans scrolling through docs.
+**Rationale**: Some documentation pages are very long (thousands of lines). Without pagination, the agent would miss later portions entirely. Line-based pagination is deterministic (line 100 is always line 100), human-readable, and uses natural boundaries that don't split mid-word or mid-code-block. This is the same pattern used by standard file reading tools. The server caches the full page on first fetch, so subsequent offset reads are served from cache without re-fetching. Token estimation was considered but rejected — token counts are approximate (model-specific, dependent on content type), opaque to the client, and solve a problem (context window budgeting) at the wrong layer. The agent manages its own context budget by adjusting `maxLines` based on what it receives.
 
 ### D8: `get-docs` accepts multiple libraries
 
@@ -1410,8 +1402,6 @@ The registry maps library names to metadata (docs URL, GitHub repo, supported la
 
 **Lean**: JIT fetch silently. The agent called `get-docs` expecting content — making it retry adds friction to the fast path. If the first fetch is slow (a few seconds), that's acceptable for the first call. Subsequent calls are fast from cache.
 
-### Q3: What is the right token estimation strategy for offset/limit?
+### Q3: ~~What is the right token estimation strategy for offset/limit?~~
 
-Token counts are approximate. Different tokenizers produce different counts. Should Pro-Context use a specific tokenizer (tiktoken cl100k, etc.), a character-based heuristic (chars/4), or let the agent specify its tokenizer?
-
-**Lean**: Use a simple character-based heuristic (1 token ≈ 4 characters) for offset/limit calculations. This is fast, requires no external dependencies, and is accurate enough for pagination purposes. Exact token counts only matter at the agent's context window boundary, which the agent manages itself.
+**Resolved**: `read-page` uses line-based pagination (`offset` as line number, `maxLines` as line count), not token-based. Token estimation is no longer needed for pagination. The `estimate_tokens` utility (chars/4) remains for BM25 chunk sizing in the search engine (Section 7 of the technical spec) — a different concern from page reading.

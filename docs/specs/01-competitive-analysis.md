@@ -378,7 +378,7 @@ DeepWiki and the documentation retrieval servers (Context7, Docfork, Deepcon, Pr
 | **Source of truth** | AI analysis of source code | Official documentation written by library maintainers |
 | **Content** | Architecture diagrams, code relationships, AI-inferred explanations | API references, guides, examples, changelogs, migration notes |
 | **Accuracy model** | Only as good as the AI's code understanding | As accurate as the official docs |
-| **Coverage** | Any public GitHub repo (50K+ pre-indexed, any repo on-demand) | Libraries with llms.txt, docs/, or custom sources |
+| **Coverage** | Any public GitHub repo (50K+ pre-indexed, any repo on-demand) | Libraries in the pre-built registry (builder-generated llms.txt for all entries) |
 | **Strengths** | "How does this codebase work?" — architecture, code flow, internal relationships | "How do I use this API?" — correct parameters, patterns, version-specific behavior |
 | **Failure modes** | AI misinterprets code intent, infers incorrect behavior, misses undocumented conventions | Official docs are incomplete, outdated, or poorly structured |
 

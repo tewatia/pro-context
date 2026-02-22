@@ -2,7 +2,7 @@
 
 > **Document**: 03-technical-spec.md
 > **Status**: Draft v2
-> **Last Updated**: 2026-02-20
+> **Last Updated**: 2026-02-22
 > **Depends on**: 02-functional-spec.md (v3)
 
 ---
@@ -19,58 +19,66 @@
   - [3.3 Auth Types (HTTP Mode)](#33-auth-types-http-mode)
   - [3.4 Configuration Types](#34-configuration-types)
   - [3.5 Infrastructure Protocols](#35-infrastructure-protocols)
-- [4. Documentation Fetcher](#4-documentation-fetcher)
-  - [4.1 Data Types](#41-data-types)
-  - [4.2 Fetcher Implementation](#42-fetcher-implementation)
-- [5. Cache Architecture](#5-cache-architecture)
-  - [5.1 Two-Tier Cache Design](#51-two-tier-cache-design)
-  - [5.2 Cache Domains](#52-cache-domains)
-  - [5.3 Cache Manager](#53-cache-manager)
-  - [5.4 Page Cache](#54-page-cache)
-  - [5.5 Cache Key Strategy](#55-cache-key-strategy)
-  - [5.6 Cache Invalidation Signals](#56-cache-invalidation-signals)
-  - [5.7 Background Refresh](#57-background-refresh)
-- [6. Registry Update Mechanism](#6-registry-update-mechanism)
-  - [6.1 Registry Distribution Strategy](#61-registry-distribution-strategy)
-  - [6.2 Local Storage](#62-local-storage)
-  - [6.3 Update Detection and Download](#63-update-detection-and-download)
-  - [6.4 Database Synchronization](#64-database-synchronization)
-  - [6.5 Configuration](#65-configuration)
-- [7. Search Engine Design](#7-search-engine-design)
-  - [7.1 Document Chunking Strategy](#71-document-chunking-strategy)
-  - [7.2 BM25 Search Implementation](#72-bm25-search-implementation)
-  - [7.3 Cross-Library Search](#73-cross-library-search)
-  - [7.4 Incremental Indexing](#74-incremental-indexing)
-  - [7.5 Ranking and Token Budgeting](#75-ranking-and-token-budgeting)
-- [8. Token Efficiency Strategy](#8-token-efficiency-strategy)
-  - [8.1 Target Metrics](#81-target-metrics)
-  - [8.2 Techniques](#82-techniques)
-  - [8.3 Token Counting](#83-token-counting)
-- [9. Transport Layer](#9-transport-layer)
-  - [9.1 stdio Transport (Local Mode)](#91-stdio-transport-local-mode)
-  - [9.2 Streamable HTTP Transport (HTTP Mode)](#92-streamable-http-transport-http-mode)
-- [10. Authentication and API Key Management](#10-authentication-and-api-key-management)
-  - [10.1 Key Generation](#101-key-generation)
-  - [10.2 Key Validation Flow](#102-key-validation-flow)
-  - [10.3 Admin CLI](#103-admin-cli)
-- [11. Rate Limiting Design](#11-rate-limiting-design)
-  - [11.1 Token Bucket Algorithm](#111-token-bucket-algorithm)
-  - [11.2 Rate Limit Headers](#112-rate-limit-headers)
-  - [11.3 Per-Key Overrides](#113-per-key-overrides)
-- [12. Security Model](#12-security-model)
-  - [12.1 Input Validation](#121-input-validation)
-  - [12.2 SSRF Prevention](#122-ssrf-prevention)
-  - [12.3 Secret Redaction](#123-secret-redaction)
-  - [12.4 Content Sanitization](#124-content-sanitization)
-- [13. Observability](#13-observability)
-  - [13.1 Structured Logging](#131-structured-logging)
-  - [13.2 Key Metrics](#132-key-metrics)
-  - [13.3 Health Check](#133-health-check)
-- [14. Database Schema](#14-database-schema)
-  - [14.1 SQLite Tables](#141-sqlite-tables)
-  - [14.2 Database Initialization](#142-database-initialization)
-  - [14.3 Cleanup Job](#143-cleanup-job)
-- [15. Fuzzy Matching](#15-fuzzy-matching)
+- [4. Library Resolution](#4-library-resolution)
+  - [4.1 Core Model: Documentation Sources, Not Packages](#41-core-model-documentation-sources-not-packages)
+  - [4.2 Registry Schema](#42-registry-schema)
+  - [4.3 Example Registry Entries](#43-example-registry-entries)
+  - [4.4 In-Memory Indexes](#44-in-memory-indexes)
+  - [4.5 Resolution Algorithm](#45-resolution-algorithm)
+  - [4.6 Fuzzy Matching](#46-fuzzy-matching)
+  - [4.7 Edge Cases](#47-edge-cases)
+  - [4.8 Query Normalization Rules](#48-query-normalization-rules)
+- [5. Documentation Fetcher](#5-documentation-fetcher)
+  - [5.1 Data Types](#51-data-types)
+  - [5.2 Fetcher Implementation](#52-fetcher-implementation)
+- [6. Cache Architecture](#6-cache-architecture)
+  - [6.1 Two-Tier Cache Design](#61-two-tier-cache-design)
+  - [6.2 Cache Domains](#62-cache-domains)
+  - [6.3 Cache Manager](#63-cache-manager)
+  - [6.4 Page Cache](#64-page-cache)
+  - [6.5 Cache Key Strategy](#65-cache-key-strategy)
+  - [6.6 Cache Invalidation Signals](#66-cache-invalidation-signals)
+  - [6.7 Background Refresh](#67-background-refresh)
+- [7. Registry Update Mechanism](#7-registry-update-mechanism)
+  - [7.1 Registry Distribution Strategy](#71-registry-distribution-strategy)
+  - [7.2 Local Storage](#72-local-storage)
+  - [7.3 Update Detection and Download](#73-update-detection-and-download)
+  - [7.4 Database Synchronization](#74-database-synchronization)
+  - [7.5 Configuration](#75-configuration)
+- [8. Search Engine Design](#8-search-engine-design)
+  - [8.1 Document Chunking Strategy](#81-document-chunking-strategy)
+  - [8.2 BM25 Search Implementation](#82-bm25-search-implementation)
+  - [8.3 Cross-Library Search](#83-cross-library-search)
+  - [8.4 Incremental Indexing](#84-incremental-indexing)
+  - [8.5 Ranking and Token Budgeting](#85-ranking-and-token-budgeting)
+- [9. Token Efficiency Strategy](#9-token-efficiency-strategy)
+  - [9.1 Target Metrics](#91-target-metrics)
+  - [9.2 Techniques](#92-techniques)
+  - [9.3 Token Counting](#93-token-counting)
+- [10. Transport Layer](#10-transport-layer)
+  - [10.1 stdio Transport (Local Mode)](#101-stdio-transport-local-mode)
+  - [10.2 Streamable HTTP Transport (HTTP Mode)](#102-streamable-http-transport-http-mode)
+- [11. Authentication and API Key Management](#11-authentication-and-api-key-management)
+  - [11.1 Key Generation](#111-key-generation)
+  - [11.2 Key Validation Flow](#112-key-validation-flow)
+  - [11.3 Admin CLI](#113-admin-cli)
+- [12. Rate Limiting Design](#12-rate-limiting-design)
+  - [12.1 Token Bucket Algorithm](#121-token-bucket-algorithm)
+  - [12.2 Rate Limit Headers](#122-rate-limit-headers)
+  - [12.3 Per-Key Overrides](#123-per-key-overrides)
+- [13. Security Model](#13-security-model)
+  - [13.1 Input Validation](#131-input-validation)
+  - [13.2 SSRF Prevention](#132-ssrf-prevention)
+  - [13.3 Secret Redaction](#133-secret-redaction)
+  - [13.4 Content Sanitization](#134-content-sanitization)
+- [14. Observability](#14-observability)
+  - [14.1 Structured Logging](#141-structured-logging)
+  - [14.2 Key Metrics](#142-key-metrics)
+  - [14.3 Health Check](#143-health-check)
+- [15. Database Schema](#15-database-schema)
+  - [15.1 SQLite Tables](#151-sqlite-tables)
+  - [15.2 Database Initialization](#152-database-initialization)
+  - [15.3 Cleanup Job](#153-cleanup-job)
 
 ---
 
@@ -109,8 +117,8 @@
 │  │  ┌──────────────────────────────────┐   │             │
 │  │  │         Cache Layer              │   │             │
 │  │  │  ┌──────────┐  ┌─────────────┐  │   │             │
-│  │  │  │ Memory   │  │   SQLite    │  │   │             │
-│  │  │  │ (LRU)    │  │ (persistent)│  │   │             │
+│  │  │  │ Memory   │  │ Persistent  │  │   │             │
+│  │  │  │ (Tier 1) │  │  (Tier 2)  │  │   │             │
 │  │  │  └──────────┘  └─────────────┘  │   │             │
 │  │  └──────────────────────────────────┘   │             │
 │  └─────────────────────────────────────────┘             │
@@ -174,11 +182,11 @@ MCP Client
        │
        ├─ 1. Validate URL against allowlist
        ├─ 2. Check page cache for this URL
-       │    ├─ HIT → serve from cache (apply offset/maxTokens)
+       │    ├─ HIT → serve from cache (apply offset/maxLines)
        │    └─ MISS → fetch URL, convert to markdown, cache full page
-       ├─ 3. Apply offset + maxTokens: return content slice
+       ├─ 3. Apply offset + maxLines: return line slice
        ├─ 4. Index page content for BM25 (background)
-       └─ 5. Return { content, totalTokens, offset, tokensReturned, hasMore }
+       └─ 5. Return { content, totalLines, offset, linesReturned, hasMore }
 ```
 
 ---
@@ -207,8 +215,10 @@ MCP Client
 ### Architectural "Not Chosen" Decisions
 
 - **No vector database**: BM25 handles keyword-heavy documentation search well without requiring an embedding model. Vector search deferred to future phase.
-- **No Redis**: SQLite provides sufficient persistence for cache. No external infrastructure needed.
+- **No Redis/PostgreSQL as default**: Embedded backends (SQLite, cachetools, in-memory) are the default — zero external infrastructure for single-user stdio mode. Redis and PostgreSQL are available as optional backends via `config.backends` (Section 3.4) for multi-user HTTP deployments.
 - **No web framework**: MCP SDK handles HTTP transport internally (Starlette under the hood). No FastAPI/Flask needed.
+- **Config-driven factory over DI container**: Backend selection uses a simple config key → factory dict mapping in `__main__.py` rather than a DI framework (dependency-injector, lagom). The dependency graph is small (~7 protocols) and a factory pattern keeps wiring explicit with zero extra dependencies. See implementation guide Section 3.5.1.
+- **Bounded Literal keys over dotted import paths**: Backend config values are bounded `Literal` types (`"sqlite"`, `"redis"`) rather than arbitrary dotted import paths (Django-style `"myapp.backends.redis.RedisCache"`). This prevents arbitrary code loading from config files and keeps the backend set validated at startup.
 
 ---
 
@@ -324,9 +334,9 @@ class PageResult:
     content: str  # Page content in markdown
     title: str  # Page title
     url: str  # Canonical URL
-    total_tokens: int  # Total page content length in estimated tokens
-    offset: int  # Token offset this response starts from
-    tokens_returned: int  # Number of tokens in this response
+    total_lines: int  # Total number of lines in the full page
+    offset: int  # Line number this response starts from (0-based)
+    lines_returned: int  # Number of lines in this response
     has_more: bool  # Whether more content exists beyond this response
     cached: bool  # Whether page was served from cache
 
@@ -399,7 +409,7 @@ class PageCacheEntry:
     url: str  # Page URL (cache key)
     content: str  # Full page content in markdown
     title: str  # Page title
-    total_tokens: int  # Total content length in estimated tokens
+    total_lines: int  # Total number of lines in the full page
     content_hash: str  # Content SHA-256 hash
     fetched_at: datetime  # When this page was fetched
     expires_at: datetime  # When this entry expires
@@ -449,7 +459,7 @@ class ServerConfig:
 @dataclass
 class CacheConfig:
     """Cache configuration"""
-    directory: str  # SQLite database directory
+    directory: str  # SQLite database directory (e.g. "~/.pro-context/cache")
     max_memory_mb: int  # Memory cache size limit
     max_memory_entries: int  # Memory cache entry limit
     default_ttl_hours: int  # Default TTL for cache entries
@@ -457,22 +467,25 @@ class CacheConfig:
 
 
 @dataclass
-class CustomSource:
-    """User-configured documentation source"""
-    name: str
-    type: Literal["url", "file", "github"]
-    url: str | None = None
-    path: str | None = None
-    library_id: str
-    ttl_hours: int | None = None
+class BackendsConfig:
+    """Infrastructure backend selection (config-driven factory).
 
+    Selects which concrete implementation satisfies each Protocol
+    (see Section 3.5). Defaults are zero-dependency embedded backends
+    suitable for single-user stdio mode. Swap to external backends
+    (Redis, PostgreSQL) for multi-user HTTP deployments.
 
-@dataclass
-class SourcesConfig:
-    """Documentation source configuration"""
-    llms_txt: dict[str, bool]  # {"enabled": True}
-    github: dict[str, bool | str]  # {"enabled": True, "token": "ghp_xxx"}
-    custom: list[CustomSource]
+    Each value is a key looked up in a backend registry dict inside
+    __main__.py — NOT a dotted import path. This keeps the set of
+    backends bounded and avoids arbitrary code loading from config."""
+    memory_cache: Literal["cachetools", "redis"] = "cachetools"
+    persistent_cache: Literal["sqlite", "postgresql"] = "sqlite"
+    search: Literal["sqlite_fts5", "postgresql_fts"] = "sqlite_fts5"
+    rate_limiter: Literal["memory", "redis"] = "memory"
+    session_store: Literal["sqlite", "redis"] = "sqlite"
+    # Connection strings for external backends (ignored when using embedded defaults)
+    redis_url: str | None = None         # e.g. "redis://localhost:6379/0"
+    postgresql_url: str | None = None    # e.g. "postgresql://user:pass@localhost/procontext"
 
 
 @dataclass
@@ -508,8 +521,8 @@ class SecurityConfig:
 class ProContextConfig:
     """Complete Pro-Context configuration"""
     server: ServerConfig
+    backends: BackendsConfig              # Infrastructure backend selection
     cache: CacheConfig
-    sources: SourcesConfig
     library_overrides: dict[str, LibraryOverride]
     rate_limit: RateLimitConfig
     logging: LoggingConfig
@@ -519,6 +532,30 @@ class ProContextConfig:
 # Note: PRO_CONTEXT_DEBUG=true env var sets logging.level to "debug"
 # See functional spec section 12 for full env var override table
 ```
+
+**Backend selection in `pro-context.config.yaml`:**
+
+```yaml
+# Default (single-user stdio mode) — all embedded, no external services
+backends:
+  memory_cache: cachetools
+  persistent_cache: sqlite
+  search: sqlite_fts5
+  rate_limiter: memory
+  session_store: sqlite
+
+# Multi-user HTTP deployment — swap to external backends
+# backends:
+#   memory_cache: redis
+#   persistent_cache: postgresql
+#   search: postgresql_fts
+#   rate_limiter: redis
+#   session_store: redis
+#   redis_url: "redis://localhost:6379/0"
+#   postgresql_url: "postgresql://procontext:secret@localhost/procontext"
+```
+
+The config keys map to bounded `Literal` types (not arbitrary dotted import paths) — the set of backends is fixed and validated at startup. See implementation guide Section 3.5.1 for the factory wiring pattern.
 
 ### 3.5 Infrastructure Protocols
 
@@ -667,11 +704,284 @@ class ApiKeyStore(Protocol):
 
 ---
 
-## 4. Documentation Fetcher
+## 4. Library Resolution
+
+### 4.1 Core Model: Documentation Sources, Not Packages
+
+The fundamental unit in Pro-Context's registry is a **Documentation Source** — a place where documentation lives. Multiple packages can map to the same source.
+
+```
+┌──────────────────────────────────────────────────────┐
+│                  Documentation Source                  │
+│                                                        │
+│  id: "langchain"                                       │
+│  name: "LangChain"                                     │
+│  llmsTxtUrl: "https://python.langchain.com/llms.txt"  │
+│                                                        │
+│  packages.pypi:                                        │
+│    "langchain", "langchain-openai", "langchain-core",  │
+│    "langchain-anthropic", "langchain-community",       │
+│    "langchain-text-splitters"                          │
+│                                                        │
+│  aliases: ["lang-chain", "lang chain"]                 │
+└──────────────────────────────────────────────────────┘
+```
+
+When an agent queries `"langchain-openai"`, Pro-Context resolves it to the **LangChain** documentation source. The agent gets LangChain's full docs — not a phantom `langchain-openai` docs site, because one doesn't exist.
+
+### 4.2 Registry Schema
+
+Each entry in `known-libraries.json` is a Documentation Source with these fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier, lowercase stable (e.g., `"langchain"`) |
+| `name` | string | Display name (e.g., `"LangChain"`) |
+| `docsUrl` | string \| null | Documentation site URL |
+| `repoUrl` | string \| null | Primary GitHub repository |
+| `languages` | list[string] | Languages supported — informational only, not used for routing |
+| `packages.pypi` | list[string] | PyPI package names that map to this source |
+| `packages.npm` | list[string] | npm package names (future) |
+| `aliases` | list[string] | Alternative names/spellings for fuzzy matching |
+| `llmsTxtUrl` | string | **Always present** — builder guarantee (native or generated) |
+
+**Builder guarantee**: Every entry has a valid `llmsTxtUrl`. The builder publishes either the library's own llms.txt, or a generated one from GitHub docs, to GitHub Pages. The MCP server never encounters a registry entry without a valid URL to fetch.
+
+### 4.3 Example Registry Entries
+
+```json
+[
+  {
+    "id": "langchain",
+    "name": "LangChain",
+    "docsUrl": "https://docs.langchain.com",
+    "repoUrl": "https://github.com/langchain-ai/langchain",
+    "languages": ["python"],
+    "packages": {
+      "pypi": [
+        "langchain", "langchain-openai", "langchain-anthropic",
+        "langchain-community", "langchain-core", "langchain-text-splitters"
+      ]
+    },
+    "aliases": ["lang-chain", "lang chain"],
+    "llmsTxtUrl": "https://python.langchain.com/llms.txt"
+  },
+  {
+    "id": "requests",
+    "name": "Requests",
+    "docsUrl": "https://requests.readthedocs.io",
+    "repoUrl": "https://github.com/psf/requests",
+    "languages": ["python"],
+    "packages": { "pypi": ["requests"] },
+    "aliases": [],
+    "llmsTxtUrl": "https://pro-context.github.io/llms-txt/requests.txt"
+  },
+  {
+    "id": "pydantic",
+    "name": "Pydantic",
+    "docsUrl": "https://docs.pydantic.dev/latest",
+    "repoUrl": "https://github.com/pydantic/pydantic",
+    "languages": ["python"],
+    "packages": {
+      "pypi": ["pydantic", "pydantic-core", "pydantic-settings", "pydantic-extra-types"]
+    },
+    "aliases": [],
+    "llmsTxtUrl": "https://docs.pydantic.dev/latest/llms.txt"
+  },
+  {
+    "id": "tensorflow",
+    "name": "TensorFlow",
+    "docsUrl": "https://www.tensorflow.org",
+    "languages": ["python", "javascript"],
+    "packages": {
+      "pypi": ["tensorflow", "tensorflow-gpu", "tensorflow-cpu", "tf-nightly"],
+      "npm": ["@tensorflow/tfjs"]
+    },
+    "aliases": ["tf"],
+    "llmsTxtUrl": "https://pro-context.github.io/llms-txt/tensorflow.txt"
+  }
+]
+```
+
+### 4.4 In-Memory Indexes
+
+At startup, `known-libraries.json` is loaded and three lookup indexes are built. All three live in memory for the lifetime of the process and are rebuilt on each restart (<100ms for a 1,000-entry registry).
+
+**Index 1: Package name → DocSource ID** (many-to-one)
+- Key: PyPI/npm package name (lowercase)
+- Value: DocSource ID
+- Example: `"langchain-openai"` → `"langchain"`, `"tf-nightly"` → `"tensorflow"`
+- Purpose: Resolves the common case where the agent passes a package name
+
+**Index 2: DocSource ID → full entry** (one-to-one)
+- Key: DocSource ID (lowercase)
+- Value: Complete DocSource dict (all fields)
+- Purpose: Fast full-entry retrieval once the ID is known
+
+**Index 3: Fuzzy search corpus** (flat list)
+- List of `(term, docSourceId)` pairs
+- Populated from: all IDs, names, package names, and aliases (all lowercased)
+- Purpose: Fuzzy matching for typos and misspellings
+
+### 4.5 Resolution Algorithm
+
+**Runtime resolution searches ONLY these in-memory indexes. No network calls. No database reads. No PyPI API. Offline-capable.**
+
+```
+resolve-library(query)
+  │
+  ├─ Step 0: Normalize input
+  │    Strip pip extras:     "langchain[openai]>=0.3"  →  "langchain"
+  │    Strip version specs:  "langchain>=0.3"          →  "langchain"
+  │    Lowercase:            "LangChain"               →  "langchain"
+  │    Trim whitespace:      " langchain "             →  "langchain"
+  │    Keep hyphens as-is:   "langchain-openai"        stays "langchain-openai"
+  │
+  ├─ Step 1: Exact package match
+  │    Lookup in Index 1 (package name → ID)
+  │    "langchain-openai" → "langchain"  ✓ MATCH
+  │    → return DocSource "langchain"
+  │
+  ├─ Step 2: Exact ID match  (if step 1 misses)
+  │    Lookup in Index 2 (ID → DocSource)
+  │    "langchain" → DocSource "langchain"  ✓ MATCH
+  │    → return DocSource "langchain"
+  │
+  ├─ Step 3: Alias match  (if step 2 misses)
+  │    Search aliases across all DocSources
+  │    "lang chain" found in DocSource "langchain".aliases  ✓ MATCH
+  │    → return DocSource "langchain"
+  │
+  ├─ Step 4: Fuzzy match  (if step 3 misses)
+  │    Levenshtein distance against Index 3 (fuzzy corpus)
+  │    "langchan" → distance 1 from "langchain"  ✓ MATCH
+  │    Returns all matches ranked by relevance score
+  │
+  └─ Step 5: No match
+       Return empty results
+       Agent options: add via custom sources config, or wait for next registry update
+```
+
+**Resolution priority and latency:**
+
+| Step | Source | Latency | Typical trigger |
+|------|--------|---------|-----------------|
+| 0 | Query parsing | <1ms | Always |
+| 1 | Package exact match | <1ms | Direct package name (most common) |
+| 2 | DocSource ID exact match | <1ms | Agent uses known library ID |
+| 3 | Alias match | <1ms | Alternative names / separator variants |
+| 4 | Fuzzy match (Levenshtein) | <10ms | Typos, misspellings |
+| 5 | No match | <1ms | Library not in registry |
+
+95%+ of queries resolve at step 1 or 2. Total resolution latency: <10ms.
+
+**What `resolve-library` returns**
+
+DocSource matches, not package matches. The `matchedVia` field tells the agent how the match was found:
+
+```json
+{
+  "results": [
+    {
+      "libraryId": "langchain",
+      "name": "LangChain",
+      "description": "Build context-aware reasoning applications",
+      "languages": ["python"],
+      "relevance": 1.0,
+      "matchedVia": "package:langchain-openai"
+    }
+  ]
+}
+```
+
+### 4.6 Fuzzy Matching
+
+Fuzzy matching (Step 4) uses Levenshtein distance via `rapidfuzz`:
+
+```python
+import re
+from rapidfuzz import fuzz
+
+def find_closest_matches(query: str, candidates: list[Library]) -> list[LibraryMatch]:
+    """Find library matches using fuzzy string matching"""
+    normalized = re.sub(r"[^a-z0-9]", "", query.lower())
+    results: list[LibraryMatch] = []
+
+    for candidate in candidates:
+        normalized_name = re.sub(r"[^a-z0-9]", "", candidate.name.lower())
+        normalized_id = re.sub(r"[^a-z0-9]", "", candidate.id.lower())
+
+        name_dist = fuzz.distance(normalized, normalized_name)
+        id_dist = fuzz.distance(normalized, normalized_id)
+        best_dist = min(name_dist, id_dist)
+
+        # Threshold scales with query length: up to 20% edit distance,
+        # minimum 1 (short queries), maximum 4.
+        max_allowed = max(1, min(4, len(normalized) // 5))
+        if best_dist <= max_allowed:
+            max_len = max(len(normalized), len(normalized_name), len(normalized_id), 1)
+            relevance = 1.0 - (best_dist / max_len)
+            results.append(
+                LibraryMatch(
+                    library_id=candidate.id,
+                    name=candidate.name,
+                    description=candidate.description,
+                    languages=candidate.languages,
+                    relevance=relevance,
+                )
+            )
+
+    return sorted(results, key=lambda x: x.relevance, reverse=True)
+```
+
+The scaled threshold handles: `"langchan"` → `"langchain"` (1 edit), `"fasapi"` → `"fastapi"` (1 edit), `"pydanctic"` → `"pydantic"` (2 edits). Returns all matches ranked by relevance, not just the best one.
+
+### 4.7 Edge Cases
+
+**Pip extras**: `"langchain[openai]"` → strip extras → `"langchain"` → step 1 exact match. Extras don't create separate documentation sources.
+
+**Monorepo sub-packages**: LangChain publishes `langchain`, `langchain-openai`, `langchain-community`, `langchain-core`, `langchain-text-splitters` as separate PyPI packages. All five are listed in DocSource `"langchain"`.`packages.pypi` and all resolve to the same documentation.
+
+**Related but separate projects**: `pydantic` and `pydantic-ai` are separate DocSources pointing to `docs.pydantic.dev` and `ai.pydantic.dev` respectively. Sharing a GitHub org is not a grouping signal — only the `packages.pypi` list determines which packages map to which DocSource.
+
+**Multi-language libraries**:
+- *Unified docs site* (protobuf.dev, grpc.io): one DocSource, one `llmsTxtUrl`. The TOC contains language-specific sections; the agent navigates to the relevant ones.
+- *Separate docs per language* (tensorflow.org vs js.tensorflow.org): naturally separate DocSources because they are different URLs. No special handling needed.
+
+**Distribution variants**: `tensorflow`, `tensorflow-gpu`, `tensorflow-cpu`, `tf-nightly` are all listed in the TensorFlow DocSource. `resolve-library("tf-nightly")` resolves at step 1.
+
+**GitHub-only libraries** (no PyPI package): not auto-discovered by the builder. Add via custom sources config:
+```yaml
+sources:
+  custom:
+    - name: "my-lib"
+      library_id: "owner/my-lib"
+      type: "url"
+      url: "https://docs.mylib.com/llms.txt"
+```
+
+### 4.8 Query Normalization Rules
+
+```
+1. Strip pip extras:     "package[extra]"    →  "package"
+2. Strip version specs:  "package>=1.0"      →  "package"
+                         "package==1.0.0"    →  "package"
+                         "package~=1.0"      →  "package"
+3. Lowercase:            "FastAPI"           →  "fastapi"
+4. Trim whitespace:      " package "         →  "package"
+5. Keep hyphens as-is:   "langchain-openai"  stays "langchain-openai"
+                         (PyPI normalizes _ → - but registry stores both forms)
+6. Separator variants handled via aliases:
+                         "lang chain", "lang-chain"  →  matched via aliases
+```
+
+---
+
+## 5. Documentation Fetcher
 
 **Architectural shift**: All documentation sources are normalized to llms.txt format by the builder system (see `docs/builder/` for details). The MCP server is a simple fetch-parse-cache layer with no source-specific logic.
 
-### 4.1 Data Types
+### 5.1 Data Types
 
 ```python
 @dataclass
@@ -685,7 +995,7 @@ class RawPageContent:
     last_modified: str | None = None  # Last-Modified header (if available)
 ```
 
-### 4.2 Fetcher Implementation
+### 5.2 Fetcher Implementation
 
 ```python
 class LlmsTxtFetcher:
@@ -820,9 +1130,9 @@ class LlmsTxtFetcher:
 
 ---
 
-## 5. Cache Architecture
+## 6. Cache Architecture
 
-### 5.1 Two-Tier Cache Design
+### 6.1 Two-Tier Cache Design
 
 ```
 Query → Memory LRU (Tier 1) → SQLite (Tier 2) → llms.txt Fetcher
@@ -834,7 +1144,7 @@ Query → Memory LRU (Tier 1) → SQLite (Tier 2) → llms.txt Fetcher
       24hr TTL (docs/pages)  Configurable/library
 ```
 
-### 5.2 Cache Domains
+### 6.2 Cache Domains
 
 The cache stores three types of content:
 
@@ -846,7 +1156,7 @@ The cache stores three types of content:
 
 Pages are cached separately because they're shared across tools — `read-page` and `get-docs` both benefit from cached pages.
 
-### 5.3 Cache Manager
+### 6.3 Cache Manager
 
 **Memory cache implementation**: `cachetools.TTLCache` is not async-safe — using `threading.Lock` blocks the event loop. Instead, `src/pro_context/cache/memory.py` implements a thin `AsyncTTLCache` wrapper using `asyncio.Lock` for the check-then-set path to prevent cache stampede (concurrent coroutines all missing the same key). Individual reads (`cache.get(key)`) are safe without a lock in asyncio's cooperative scheduling model.
 
@@ -939,13 +1249,13 @@ class CacheManager:
         return datetime.now() > entry.expires_at
 ```
 
-### 5.4 Page Cache
+### 6.4 Page Cache
 
-Pages fetched by `read-page` are cached in full. Offset-based reads serve slices from the cached page without re-fetching.
+Pages fetched by `read-page` are cached in full. Line-based reads serve slices from the cached page without re-fetching.
 
 ```python
 class PageCache:
-    """Page-specific cache with offset-based slice support.
+    """Page-specific cache with line-based slice support.
 
     Depends on MemoryCache and PersistentPageCache protocols (Section 3.5).
     Default implementations: AsyncTTLCache (memory) + SqlitePageCache (persistent).
@@ -971,27 +1281,25 @@ class PageCache:
         return persist_result or mem_result or None
 
     async def get_slice(
-        self, url: str, offset: int, max_tokens: int
+        self, url: str, offset: int, max_lines: int
     ) -> PageResult | None:
-        """Get a slice of the page content at the given offset"""
+        """Get a slice of the page content starting from a line number"""
         page = await self.get_page(url)
         if not page:
             return None
 
-        # Estimate character positions from token counts (1 token ≈ 4 chars)
-        start_char = offset * 4
-        max_chars = max_tokens * 4
-        slice_content = page.content[start_char : start_char + max_chars]
-        tokens_returned = len(slice_content) // 4
+        lines = page.content.splitlines(keepends=True)
+        slice_lines = lines[offset : offset + max_lines]
+        slice_content = "".join(slice_lines)
 
         return PageResult(
             content=slice_content,
             title=page.title,
             url=url,
-            total_tokens=page.total_tokens,
+            total_lines=page.total_lines,
             offset=offset,
-            tokens_returned=tokens_returned,
-            has_more=start_char + max_chars < len(page.content),
+            lines_returned=len(slice_lines),
+            has_more=offset + max_lines < len(lines),
             cached=True,
         )
 
@@ -1000,7 +1308,7 @@ class PageCache:
         return datetime.now() > entry.expires_at
 ```
 
-### 5.5 Cache Key Strategy
+### 6.5 Cache Key Strategy
 
 ```
 TOC key:  SHA-256("toc:" + libraryId)
@@ -1008,7 +1316,7 @@ Doc key:  SHA-256("doc:" + libraryId + ":" + normalizedTopic)
 Page key: SHA-256("page:" + url)
 ```
 
-### 5.6 Cache Invalidation Signals
+### 6.6 Cache Invalidation Signals
 
 | Signal | Trigger | Action |
 |--------|---------|--------|
@@ -1021,7 +1329,7 @@ Page key: SHA-256("page:" + url)
 
 **`check_freshness()` call point**: During background refresh (step 2 below), the fetcher's `check_freshness()` is called first as a cheap HEAD request. If it returns `True` (cache still valid), only the `expires_at` timestamp is extended — no re-fetch needed. If it returns `False` or is unavailable, the full content is re-fetched and the SHA is compared.
 
-### 5.7 Background Refresh
+### 6.7 Background Refresh
 
 When a stale cache entry is served, a background refresh is triggered:
 
@@ -1058,7 +1366,7 @@ If background refresh fails (network error, site down, 404), the server:
 
 ---
 
-## 6. Registry Update Mechanism
+## 7. Registry Update Mechanism
 
 **IMPORTANT**: The registry (`known-libraries.json`) is **completely independent from the pro-context package version**.
 
@@ -1069,7 +1377,7 @@ If background refresh fails (network error, site down, 404), the server:
 
 This separation allows frequent data updates without code changes.
 
-### 6.1 Registry Distribution Strategy
+### 7.1 Registry Distribution Strategy
 
 **Release strategy:**
 - **Code releases**: Semantic versioning (`v0.1.0`, `v0.2.0`, etc.)
@@ -1101,7 +1409,7 @@ This separation allows frequent data updates without code changes.
 - Used if local copy is missing or GitHub is unreachable
 - Ensures offline functionality
 
-### 6.2 Local Storage
+### 7.2 Local Storage
 
 **Location:** `~/.local/share/pro-context/registry/`
 
@@ -1118,7 +1426,7 @@ This separation allows frequent data updates without code changes.
 - Files owned by user running pro-context
 - No special permissions required
 
-### 6.3 Update Detection and Download
+### 7.3 Update Detection and Download
 
 **stdio mode (local):**
 
@@ -1130,7 +1438,7 @@ A background task polls GitHub for registry updates every 24 hours. When a new v
 
 **Diff strategy:** Compare old and new registries by `library_id`. Classify each library as: added, removed, or `url_changed` (only `llms_txt_url` changes matter — they invalidate cached content). All other metadata changes are safe to apply without cache invalidation.
 
-### 6.4 Database Synchronization
+### 7.4 Database Synchronization
 
 When a registry update is applied, all cache entries for libraries with changed `llms_txt_url` are marked `stale = 1` in a single batched UPDATE within a transaction. The registry version is recorded in `system_metadata`. Stale entries are served immediately (with `stale: true`) while a background refresh fetches fresh content.
 
@@ -1156,7 +1464,7 @@ When a registry update is applied, all cache entries for libraries with changed 
 | New URL returns 404 | Serve stale data, retry later, log warning |
 | Offline (no GitHub) | Skip update, use current registry |
 
-### 6.5 Configuration
+### 7.5 Configuration
 
 **config.yaml:**
 ```yaml
@@ -1182,11 +1490,11 @@ pro-context update-registry
 
 ---
 
-## 7. Search Engine Design
+## 8. Search Engine Design
 
 All search operations go through the `SearchBackend` protocol (Section 3.5). The default implementation uses SQLite FTS5. The chunker is independent of the search backend — it produces `DocChunk` objects that any `SearchBackend` can index.
 
-### 7.1 Document Chunking Strategy
+### 8.1 Document Chunking Strategy
 
 Raw documentation is chunked into focused sections for indexing and retrieval.
 
@@ -1215,7 +1523,7 @@ Raw documentation is chunked into focused sections for indexing and retrieval.
 | Paragraph chunk (oversized sections) | 300 | 100 | 500 |
 | Code example chunk | Variable | 50 | 2,000 |
 
-### 7.2 BM25 Search Implementation
+### 8.2 BM25 Search Implementation
 
 BM25 ranking is provided by SQLite FTS5's built-in `bm25()` function. FTS5 handles tokenization, inverted index maintenance, and scoring internally. Queries use the `MATCH` operator against `search_fts`, ordered by `bm25(search_fts)`.
 
@@ -1225,17 +1533,17 @@ BM25 ranking is provided by SQLite FTS5's built-in `bm25()` function. FTS5 handl
 
 Results are normalized to a 0–1 relevance score before returning to callers.
 
-### 7.3 Cross-Library Search
+### 8.3 Cross-Library Search
 
 When `search-docs` is called without `libraryIds`, it searches across all indexed content. The BM25 index contains chunks from all libraries, each tagged with their `libraryId`. Results are ranked globally — a highly relevant chunk from library A ranks above a marginally relevant chunk from library B.
 
 The `searchedLibraries` field in the response lists which libraries had indexed content at query time, so the agent knows the search scope.
 
-### 7.4 Incremental Indexing
+### 8.4 Incremental Indexing
 
 Pages are indexed for BM25 as they're fetched — by `get-docs` (JIT fetch), `get-library-info` (TOC fetch), and `read-page` (page fetch). The search index grows organically as the agent uses Pro-Context. There is no upfront bulk indexing step.
 
-### 7.5 Ranking and Token Budgeting
+### 8.5 Ranking and Token Budgeting
 
 When returning results via `get-docs`, the system applies a token budget:
 
@@ -1253,9 +1561,9 @@ When returning results via `get-docs`, the system applies a token budget:
 
 ---
 
-## 8. Token Efficiency Strategy
+## 9. Token Efficiency Strategy
 
-### 8.1 Target Metrics
+### 9.1 Target Metrics
 
 **Token metrics:**
 
@@ -1277,25 +1585,25 @@ When returning results via `get-docs`, the system applies a token budget:
 
 These are the pass/fail criteria for integration and performance tests. Cold fetch latency depends on network conditions and documentation site response time; 3–5s represents a reasonable P95 for well-behaved external sources.
 
-### 8.2 Techniques
+### 9.2 Techniques
 
 1. **Focused chunking**: Split docs into small, self-contained sections (target: 500 tokens/chunk)
 2. **Relevance ranking**: BM25 ensures only relevant chunks are returned
-3. **Token budgeting**: `maxTokens` parameter caps response size (default: 5,000 for get-docs, 10,000 for read-page)
+3. **Token budgeting**: `maxTokens` parameter caps response size for get-docs (default: 5,000)
 4. **Snippet generation**: `search-docs` returns snippets (~100 tokens each), not full content
 5. **Section targeting**: Use heading hierarchy to find the most specific relevant section
-6. **Offset-based reading**: `read-page` returns slices of large pages, avoiding re-sending content the agent has already seen
+6. **Line-based reading**: `read-page` returns line-bounded slices of large pages (default: 200 lines), avoiding re-sending content the agent has already seen
 7. **TOC section filtering**: `get-library-info` with `sections` parameter returns only relevant sections of large TOCs
 
-### 8.3 Token Counting
+### 9.3 Token Counting
 
 Approximate token count using character count / 4. This is sufficient for budgeting purposes — exact token counts are model-specific and not needed.
 
 ---
 
-## 9. Transport Layer
+## 10. Transport Layer
 
-### 9.1 stdio Transport (Local Mode)
+### 10.1 stdio Transport (Local Mode)
 
 ```python
 # src/pro_context/__main__.py
@@ -1327,7 +1635,7 @@ if __name__ == "__main__":
 - Communication via stdin/stdout
 - Process lifecycle managed by MCP client
 
-### 9.2 Streamable HTTP Transport (HTTP Mode)
+### 10.2 Streamable HTTP Transport (HTTP Mode)
 
 > **Note**: This replaces the deprecated HTTP+SSE transport from MCP spec 2024-11-05. The old `SseServerTransport` / `mcp.server.sse` is **not** used. See [MCP spec 2025-11-25 transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports.md) for the full specification.
 
@@ -1460,9 +1768,9 @@ uvicorn.run(
 
 ---
 
-## 10. Authentication and API Key Management
+## 11. Authentication and API Key Management
 
-### 10.1 Key Generation
+### 11.1 Key Generation
 
 ```
 1. Generate 32 random bytes using secrets.token_bytes(32)
@@ -1474,7 +1782,7 @@ uvicorn.run(
 
 **Key format**: `pc_` prefix + 40 chars base64url = `pc_aBcDeFgH...` (43 chars total)
 
-### 10.2 Key Validation Flow
+### 11.2 Key Validation Flow
 
 ```
 1. Extract Bearer token from Authorization header
@@ -1486,7 +1794,7 @@ uvicorn.run(
 7. Update last_used_at and request_count
 ```
 
-### 10.3 Admin CLI
+### 11.3 Admin CLI
 
 ```bash
 # Create a new API key
@@ -1506,11 +1814,11 @@ The admin CLI is a separate entry point (`src/pro_context/auth/admin_cli.py`) th
 
 ---
 
-## 11. Rate Limiting Design
+## 12. Rate Limiting Design
 
 All rate limiting operations go through the `RateLimiter` protocol (Section 3.5). The default implementation is an in-memory token bucket. For multi-instance deployments, swap in a Redis-backed implementation satisfying the same protocol.
 
-### 11.1 Token Bucket Algorithm
+### 12.1 Token Bucket Algorithm
 
 Each API key gets its own token bucket:
 
@@ -1527,7 +1835,7 @@ On request:
   4. If tokens < 1 → reject with RATE_LIMITED, retryAfter = (1 - tokens) / refillRate
 ```
 
-### 11.2 Rate Limit Headers
+### 12.2 Rate Limit Headers
 
 HTTP responses include rate limit headers:
 
@@ -1537,7 +1845,7 @@ X-RateLimit-Remaining: 42
 X-RateLimit-Reset: 1707700000
 ```
 
-### 11.3 Per-Key Overrides
+### 12.3 Per-Key Overrides
 
 API keys can have custom rate limits:
 
@@ -1557,17 +1865,16 @@ Inbound rate limiting (Sections 11.1–11.3) protects the server. Outbound rate 
 
 | Domain | Max concurrent connections | Notes |
 |--------|---------------------------|-------|
-| `api.github.com` | 2 | GitHub API rate limit: 60 req/hr unauthenticated, 5,000 req/hr authenticated |
-| `raw.githubusercontent.com` | 5 | Raw file fetches, no rate limit but be polite |
+| `raw.githubusercontent.com` | 5 | Raw file fetches (builder-generated llms.txt hosted here) |
 | `*.readthedocs.io`, `*.github.io`, other doc sites | 5 | Per-host cap via httpx pool |
 
-**GitHub API token**: If `sources.github.token` is configured, it is sent as a `Authorization: Bearer` header on all `api.github.com` requests, raising the rate limit to 5,000 req/hr.
+> **Note**: The MCP server does not call `api.github.com` at runtime. GitHub API access is a build-time concern handled by the builder system (see `docs/builder/`).
 
 ---
 
-## 12. Security Model
+## 13. Security Model
 
-### 12.1 Input Validation
+### 13.1 Input Validation
 
 All inputs are validated at the MCP boundary using Pydantic models before any processing:
 
@@ -1595,7 +1902,7 @@ class GetDocsInput(BaseModel):
 class ReadPageInput(BaseModel):
     """Input schema for read-page tool"""
     url: str = Field(max_length=2000)
-    max_tokens: int = Field(default=10000, ge=500, le=50000)
+    max_lines: int = Field(default=200, ge=1, le=5000)
     offset: int = Field(default=0, ge=0)
 
     @field_validator('url')
@@ -1608,7 +1915,7 @@ class ReadPageInput(BaseModel):
         return v
 ```
 
-### 12.2 SSRF Prevention
+### 13.2 SSRF Prevention
 
 URL fetching is restricted to known documentation domains:
 
@@ -1647,13 +1954,12 @@ def is_allowed_url(url: str, allowlist: list[str]) -> bool:
 
 - No fetching of private IPs (127.0.0.1, 10.x, 192.168.x, etc.)
 - No fetching of file:// URLs
-- URLs must come from resolved TOCs, search results, relatedPages, or configured allowlist
-- Custom sources in config are added to the allowlist
+- URLs must come from the registry (llmsTxtUrl), resolved TOCs, search results, relatedPages, or the configured allowlist
 - **Dynamic expansion**: When an llms.txt file is fetched, all URLs in it are added to the session allowlist
 
 **Redirect validation**: `httpx` must be configured with `follow_redirects=False`. Redirects are handled manually: the redirect target URL is passed through `is_allowed_url()` before following. A redirect to a private IP or non-allowlisted domain is rejected with `URL_NOT_ALLOWED`, even if the original URL passed the check. Maximum redirect depth: 3.
 
-### 12.3 Secret Redaction
+### 13.3 Secret Redaction
 
 structlog logger is configured with processor pipelines for secret redaction:
 
@@ -1688,7 +1994,7 @@ structlog.configure(
 )
 ```
 
-### 12.4 Content Sanitization
+### 13.4 Content Sanitization
 
 Documentation content is treated as untrusted text:
 
@@ -1699,9 +2005,9 @@ Documentation content is treated as untrusted text:
 
 ---
 
-## 13. Observability
+## 14. Observability
 
-### 13.1 Structured Logging
+### 14.1 Structured Logging
 
 Every request produces a structured log entry:
 
@@ -1722,7 +2028,7 @@ Every request produces a structured log entry:
 }
 ```
 
-### 13.2 Key Metrics
+### 14.2 Key Metrics
 
 | Metric | Description | Exposed Via |
 |--------|-------------|-------------|
@@ -1734,7 +2040,7 @@ Every request produces a structured log entry:
 | Error rate | % of requests returning errors | health resource |
 | Rate limit rejections | Count of rate-limited requests | logs |
 
-### 13.3 Health Check
+### 14.3 Health Check
 
 The `pro-context://health` resource returns:
 
@@ -1760,11 +2066,11 @@ Status determination:
 
 ---
 
-## 14. Database Schema
+## 15. Database Schema
 
 This section documents the **default SQLite schema**. The concrete SQLite classes (`SqliteCache`, `SqlitePageCache`, `SqliteSessionStore`, `SqliteApiKeyStore`, `FTS5SearchBackend`) implement the protocols defined in Section 3.5. Alternative backends (PostgreSQL, Redis) implement the same protocols with their own storage schemas.
 
-### 14.1 SQLite Tables
+### 15.1 SQLite Tables
 
 ```sql
 -- Documentation cache (chunks from get-docs)
@@ -1794,7 +2100,7 @@ CREATE TABLE IF NOT EXISTS page_cache (
   url TEXT NOT NULL,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
-  total_tokens INTEGER NOT NULL,
+  total_lines INTEGER NOT NULL,
   content_hash TEXT NOT NULL,
   etag TEXT,                      -- ETag header from source (NULL if not provided)
   last_modified TEXT,             -- Last-Modified header from source (NULL if not provided)
@@ -1906,7 +2212,7 @@ INSERT OR IGNORE INTO system_metadata (key, value)
 VALUES ('registry_version', 'bundled');  -- Updated on first registry load
 ```
 
-### 14.2 Database Initialization
+### 15.2 Database Initialization
 
 ```python
 import aiosqlite
@@ -1919,11 +2225,11 @@ async def initialize_database(db: aiosqlite.Connection) -> None:
     await db.execute("PRAGMA foreign_keys = ON")
 
     # Run CREATE TABLE statements...
-    # (See section 14.1 for full schema)
+    # (See section 15.1 for full schema)
     await db.commit()
 ```
 
-### 14.3 Cleanup Job
+### 15.3 Cleanup Job
 
 ```python
 from datetime import datetime
@@ -1943,47 +2249,3 @@ The cleanup job runs on the configured interval (`cache.cleanup_interval_minutes
 
 ---
 
-## 15. Fuzzy Matching
-
-Library name resolution uses Levenshtein distance for fuzzy matching via `rapidfuzz`:
-
-```python
-import re
-from rapidfuzz import fuzz
-
-def find_closest_matches(query: str, candidates: list[Library]) -> list[LibraryMatch]:
-    """Find library matches using fuzzy string matching"""
-    normalized = re.sub(r"[^a-z0-9]", "", query.lower())
-    results: list[LibraryMatch] = []
-
-    for candidate in candidates:
-        normalized_name = re.sub(r"[^a-z0-9]", "", candidate.name.lower())
-        normalized_id = re.sub(r"[^a-z0-9]", "", candidate.id.lower())
-
-        # Use rapidfuzz for fast Levenshtein distance
-        name_dist = fuzz.distance(normalized, normalized_name)
-        id_dist = fuzz.distance(normalized, normalized_id)
-        best_dist = min(name_dist, id_dist)
-
-        # Threshold scales with query length: allow up to 20% edit distance,
-        # minimum threshold of 1 (for very short queries), maximum of 4.
-        # Avoids negative relevance and false positives on short strings.
-        max_allowed = max(1, min(4, len(normalized) // 5))
-        if best_dist <= max_allowed:
-            # Normalise against the longer of the two strings to keep score in [0, 1]
-            max_len = max(len(normalized), len(normalized_name), len(normalized_id), 1)
-            relevance = 1.0 - (best_dist / max_len)
-            results.append(
-                LibraryMatch(
-                    library_id=candidate.id,
-                    name=candidate.name,
-                    description=candidate.description,
-                    languages=candidate.languages,
-                    relevance=relevance,
-                )
-            )
-
-    return sorted(results, key=lambda x: x.relevance, reverse=True)
-```
-
-This handles common typos like "langchan" → "langchain", "fasapi" → "fastapi", "pydanctic" → "pydantic". Returns all matches ranked by relevance, not just the best one.
