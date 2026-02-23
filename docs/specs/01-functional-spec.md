@@ -242,6 +242,7 @@ For shared or remote deployments. Implements the MCP Streamable HTTP transport s
 **Characteristics**:
 - Exposes a single `/mcp` endpoint
 - Session management via `MCP-Session-Id` header
+- Bearer key authentication (see Section 8 and Section 10, D3)
 - Origin validation enforced (see Section 8)
 - Protocol version validation via `MCP-Protocol-Version` header
 - Supports `SUPPORTED_PROTOCOL_VERSIONS = {"2025-11-25", "2025-03-26"}`
@@ -304,6 +305,13 @@ A single SQLite database (`cache.db`) stores all fetched content.
 ---
 
 ## 8. Security Model
+
+### Bearer Key Authentication (HTTP mode)
+
+- In HTTP mode, all requests must include `Authorization: Bearer <key>`. Requests with a missing or incorrect key receive HTTP 401.
+- The key is configured via `server.auth_key` in `pro-context.yaml` or the `PRO_CONTEXT__SERVER__AUTH_KEY` env var.
+- If no key is configured, the server auto-generates a random key at startup and logs it to stderr.
+- Stdio mode is unaffected — no authentication is required (the transport is a local pipe owned by the spawning process).
 
 ### SSRF Prevention
 
@@ -372,8 +380,8 @@ Pro-Context does not chunk documents or decide which content is relevant. The ag
 **D2: Single SQLite cache tier**
 A two-tier cache (memory + SQLite) adds meaningful complexity for marginal latency gain in single-user deployments. SQLite with WAL mode delivers <5ms reads, which is acceptable when the bottleneck is network fetch (100ms–3s). A memory tier can be added in the enterprise version where multi-user throughput justifies it.
 
-**D3: No authentication in open-source version**
-The open-source version is designed for local (stdio) or trusted-network (HTTP) use. Adding API key management, hashing, and revocation for a single-user local tool is unnecessary complexity. Authentication is an enterprise concern.
+**D3: Optional bearer key for HTTP mode**
+Stdio mode requires no authentication — the MCP client spawns the server, and the transport is a local pipe. HTTP mode includes optional bearer key authentication: if `server.auth_key` is set in the config, all requests must include a matching `Authorization: Bearer <key>` header or receive HTTP 401. If no key is configured, the server auto-generates one at startup and logs it to stderr. This is lightweight access control for shared-network deployments, not a full auth system — there is no key rotation, hashing, or revocation.
 
 **D4: Registry independence from server version**
 The registry (`known-libraries.json`) has its own release cadence (weekly) completely decoupled from the MCP server version. Users get updated library coverage without upgrading the server.

@@ -43,7 +43,7 @@
 pro-context/
 ├── pyproject.toml
 ├── CHANGELOG.md                      # Keep a Changelog format; updated on every release
-├── pro-context.yaml                  # Example config (committed, used as reference)
+├── pro-context.example.yaml          # Example config (committed); copy to pro-context.yaml for local use
 ├── src/
 │   └── pro_context/
 │       ├── __init__.py               # __version__ only
@@ -126,15 +126,15 @@ requires-python = ">=3.12"
 license = { text = "GPL-3.0" }
 
 dependencies = [
-    "mcp>=1.9.0,<2.0.0",                    # FastMCP — official MCP Python SDK
-    "httpx>=0.27.0,<1.0.0",                  # Async HTTP client
+    "mcp>=1.26.0,<2.0.0",                   # FastMCP — official MCP Python SDK
+    "httpx>=0.28.0,<1.0.0",                  # Async HTTP client
     "aiosqlite>=0.19.0,<1.0.0",              # Async SQLite
     "pydantic>=2.5.0,<3.0.0",               # Data validation
     "pydantic-settings>=2.2.0,<3.0.0",      # YAML config + env var overrides
     "pyyaml>=6.0.1,<7.0.0",                 # YAML parser (required by pydantic-settings)
     "rapidfuzz>=3.6.0,<4.0.0",              # Levenshtein fuzzy matching
     "structlog>=24.1.0,<26.0.0",            # Structured logging
-    "uvicorn>=0.27.0,<1.0.0",               # ASGI server for HTTP transport
+    "uvicorn>=0.34.0,<1.0.0",               # ASGI server for HTTP transport
 ]
 
 [project.scripts]
@@ -143,12 +143,11 @@ pro-context = "pro_context.server:main"
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
+    "pytest-asyncio>=1.0.0",
     "pytest-mock>=3.12.0",
     "respx>=0.21.0",                            # httpx request mocking
-    "ruff>=0.3.0",
-    "pyright>=1.1.350",                         # Type checking (also run in CI)
-    "python-semantic-release>=9.0.0,<10.0.0",  # Changelog generation + PyPI publishing
+    "ruff>=0.11.0",
+    "pyright>=1.1.400",                         # Type checking (also run in CI)
 ]
 
 [tool.pytest.ini_options]
@@ -161,6 +160,9 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "TCH"]
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]
 
 [tool.pyright]
 pythonVersion = "3.12"
@@ -177,6 +179,8 @@ include = ["src"]
 **`testpaths`**: Prevents pytest from discovering tests in unexpected locations (e.g., inside `src/`) when run from the project root.
 
 **Version pinning**: Minor version upper bounds (`<2.0.0`) on all dependencies. Tighten to patch bounds only if a dependency has a documented history of breaking minor releases.
+
+**Version floors**: Since this is a new project with no legacy consumers, version floors should track reasonably close to the latest stable release at the time of writing. There is no reason to support old versions that nobody is using yet. Review and bump floors at the start of each implementation phase — stale floors accumulate silently and can mask behavioural differences between the version you test against and the version the floor permits.
 
 **Dependency footprint**: Pro-Context has 9 runtime dependencies. Each is justified by a capability that would require significantly more code to replicate correctly (async HTTP with SSRF-safe redirect control, async SQLite, fuzzy string matching, structured logging, validated settings). Zero-dependency is a virtue but not at the cost of correctness or maintainability. Before adding any new runtime dependency, verify that the same capability cannot be covered by an existing dependency or the Python standard library.
 
@@ -399,7 +403,7 @@ Each phase produces working, tested code. Later phases build on earlier ones wit
 | `src/pro_context/state.py` | `AppState` dataclass (fields populated across phases) |
 | `src/pro_context/protocols.py` | `CacheProtocol`, `FetcherProtocol` stubs |
 | `src/pro_context/server.py` | `FastMCP("pro-context")`, lifespan stub, `main()` entrypoint |
-| `pro-context.yaml` | Example config with all fields and comments |
+| `pro-context.example.yaml` | Example config with all fields and comments (committed; `pro-context.yaml` is gitignored) |
 
 **Verification**:
 ```bash
@@ -497,21 +501,26 @@ echo '{}' | uv run pro-context  # Responds without crash
 
 ### Phase 4: HTTP Transport
 
-**Goal**: Server runs in HTTP mode with Origin validation and protocol version checking.
+**Goal**: Server runs in HTTP mode with bearer key authentication, Origin validation, and protocol version checking.
 
 **Files to create/update**:
 
 | File | What to implement |
 |------|------------------|
-| `src/pro_context/transport.py` | `MCPSecurityMiddleware` (Origin validation, protocol version check) |
-| `src/pro_context/server.py` | `run_http_server()`: attach middleware, start uvicorn |
+| `src/pro_context/transport.py` | `MCPSecurityMiddleware` (bearer key auth, Origin validation, protocol version check) |
+| `src/pro_context/config.py` | Add `auth_key` field to `ServerSettings` |
+| `src/pro_context/server.py` | `run_http_server()`: auto-generate key if not configured, log key to stderr, attach middleware, start uvicorn |
 | `tests/integration/test_tools.py` | Add HTTP mode transport tests |
 
 **Key behaviours to verify**:
+- POST to `/mcp` with valid bearer key → 200
+- POST to `/mcp` with missing `Authorization` header → 401
+- POST to `/mcp` with incorrect bearer key → 401
 - POST to `/mcp` with valid origin → 200
 - POST to `/mcp` with non-localhost origin → 403
 - POST to `/mcp` with unknown `MCP-Protocol-Version` header → 400
 - `transport = "http"` in config starts uvicorn, `transport = "stdio"` starts stdio mode
+- No `auth_key` in config → key auto-generated at startup, logged to stderr
 
 ---
 
@@ -529,6 +538,7 @@ echo '{}' | uv run pro-context  # Responds without crash
 | `CHANGELOG.md` | Initial entry for v0.1.0; [Keep a Changelog](https://keepachangelog.com) format |
 | `.github/workflows/ci.yml` | Full CI pipeline (see Section 6) |
 | `.github/workflows/release.yml` | Release pipeline: version bump, changelog update, PyPI publish (see Section 6) |
+| `pyproject.toml` | Add `python-semantic-release` to dev deps, add `[tool.semantic_release]` config |
 
 **Key behaviours to verify**:
 - Registry metadata fetch happens at startup (mocked in test)
@@ -693,8 +703,12 @@ async def app_state(indexes, sample_entries):
 - `get_library_docs`: unknown library raises `LIBRARY_NOT_FOUND`
 - `read_page`: cache miss path (mocked HTTP), cache hit path
 - `read_page`: URL not in allowlist raises `URL_NOT_ALLOWED`
+- HTTP transport: missing bearer key → 401
+- HTTP transport: incorrect bearer key → 401
+- HTTP transport: valid bearer key → 200
 - HTTP transport: non-localhost origin → 403
 - HTTP transport: unknown protocol version → 400
+- HTTP transport: no `auth_key` in config → key auto-generated, logged to stderr
 
 **Coverage target**: 90% line coverage. Branches covering network errors and cache misses are explicitly tested via mocking — not left to chance.
 
@@ -815,19 +829,17 @@ jobs:
 
 **Why `workflow_run` instead of `needs`**: `needs` only works between jobs in the same workflow file. To gate the release on a passing CI run from a separate `ci.yml`, `workflow_run` is required. The `if: conclusion == 'success'` condition ensures the release job is skipped entirely when CI fails.
 
-Add `python-semantic-release` to dev dependencies:
+`python-semantic-release` and its `[tool.semantic_release]` config in `pyproject.toml` are added in Phase 5 — the release pipeline is not needed until the project is ready to publish.
 
 ```toml
+# Added to pyproject.toml in Phase 5:
+
 [project.optional-dependencies]
 dev = [
     ...
-    "python-semantic-release>=9.0.0,<10.0.0",
+    "python-semantic-release>=9.0.0,<10.0.0",  # Changelog generation + PyPI publishing
 ]
-```
 
-Configure in `pyproject.toml`:
-
-```toml
 [tool.semantic_release]
 version_variables = ["src/pro_context/__init__.py:__version__"]
 changelog_file = "CHANGELOG.md"
@@ -849,8 +861,7 @@ uv run pro-context
 
 # 3. Run in HTTP mode
 PRO_CONTEXT__SERVER__TRANSPORT=http uv run pro-context
-# or
-uv run pro-context --config pro-context.yaml  # with transport: http
+# or: copy pro-context.example.yaml → pro-context.yaml, set transport: http
 
 # 4. Run all tests
 uv run pytest
@@ -867,7 +878,7 @@ uv run ruff check src/ tests/
 uv run ruff format src/ tests/
 ```
 
-**Development config** (`pro-context.yaml` for local use):
+**Development config** (copy `pro-context.example.yaml` to `pro-context.yaml` and adjust):
 
 ```yaml
 server:

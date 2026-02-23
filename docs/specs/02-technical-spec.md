@@ -120,15 +120,16 @@ read-page("https://docs.langchain.com/concepts/streaming.md")
 |-----------|--------|---------|-----------|
 | Language | Python | 3.12+ | Modern asyncio, improved error messages, per-interpreter GIL |
 | Package manager | uv | latest | Fast installs, lock files, `uvx` for tool distribution |
-| MCP framework | FastMCP (mcp package) | latest | Official Python MCP SDK; handles protocol, tool registration, transport |
-| HTTP client | httpx | ≥0.27 | Async-native, connection pooling, manual redirect control (required for SSRF) |
+| MCP framework | FastMCP (mcp package) | ≥1.26 | Official Python MCP SDK; handles protocol, tool registration, transport |
+| HTTP client | httpx | ≥0.28 | Async-native, connection pooling, manual redirect control (required for SSRF) |
 | SQLite driver | aiosqlite | ≥0.19 | Async wrapper over sqlite3; WAL mode for concurrent reads |
 | Data validation | pydantic v2 | ≥2.5 | Fast validation, settings management, serialisation |
 | Fuzzy matching | rapidfuzz | ≥3.6 | C extension, Levenshtein distance for resolve-library fuzzy step |
 | Logging | structlog | ≥24.1 | Structured JSON logs; context binding per request |
 | Config | pydantic-settings | ≥2.2 | YAML config with env var overrides, validated at startup |
 | Config parsing | pyyaml | ≥6.0 | YAML parser required by pydantic-settings `YamlConfigSettingsSource` |
-| Linting/formatting | ruff | ≥0.3 | Single tool for lint + format, replaces flake8/black/isort |
+| ASGI server | uvicorn | ≥0.34 | HTTP transport for Phase 4; ASGI lifespan support |
+| Linting/formatting | ruff | ≥0.11 | Single tool for lint + format, replaces flake8/black/isort |
 
 ---
 
@@ -789,19 +790,30 @@ Implements MCP Streamable HTTP (spec 2025-11-25). A single `/mcp` endpoint handl
 ```python
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.responses import Response
 import re
+import secrets
 
 SUPPORTED_PROTOCOL_VERSIONS = frozenset({"2025-11-25", "2025-03-26"})
 _LOCALHOST_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
 
 class MCPSecurityMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, *, auth_key: str):
+        super().__init__(app)
+        self.auth_key = auth_key
+
     async def dispatch(self, request: Request, call_next):
-        # 1. Origin validation — prevents DNS rebinding attacks
+        # 1. Bearer key authentication
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.startswith("Bearer ") or auth_header[7:] != self.auth_key:
+            return Response("Unauthorized", status_code=401)
+
+        # 2. Origin validation — prevents DNS rebinding attacks
         origin = request.headers.get("origin", "")
         if origin and not _LOCALHOST_ORIGIN.match(origin):
             return Response("Forbidden", status_code=403)
 
-        # 2. Protocol version — reject unknown versions early
+        # 3. Protocol version — reject unknown versions early
         proto_version = request.headers.get("mcp-protocol-version", "")
         if proto_version and proto_version not in SUPPORTED_PROTOCOL_VERSIONS:
             return Response(
@@ -811,6 +823,8 @@ class MCPSecurityMiddleware(BaseHTTPMiddleware):
 
         return await call_next(request)
 ```
+
+**Key generation**: If `server.auth_key` is not set in the config, the server generates a 32-byte URL-safe random key at startup via `secrets.token_urlsafe(32)` and logs it to stderr. The key is passed to the middleware constructor.
 
 **Server startup** for HTTP mode:
 
@@ -903,6 +917,7 @@ server:
   transport: stdio       # stdio | http
   host: "0.0.0.0"        # HTTP mode only
   port: 8080             # HTTP mode only
+  auth_key: ""           # HTTP mode only — if empty, auto-generated at startup
 
 registry:
   url: "https://pro-context.github.io/known-libraries.json"
@@ -935,6 +950,7 @@ class ServerSettings(BaseModel):
     transport: Literal["stdio", "http"] = "stdio"
     host: str = "0.0.0.0"
     port: int = 8080
+    auth_key: str = ""  # HTTP mode only — if empty, auto-generated at startup
 
 class RegistrySettings(BaseModel):
     url: str = "https://pro-context.github.io/known-libraries.json"
@@ -946,7 +962,7 @@ class CacheSettings(BaseModel):
     cleanup_interval_hours: int = 6
 
 class LoggingSettings(BaseModel):
-    level: str = "INFO"
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     format: Literal["json", "text"] = "json"
 
 class Settings(BaseSettings):

@@ -568,6 +568,7 @@ Result:
   },
   "required": ["url", "headings", "content", "cached", "cachedAt", "stale"]
 }
+```
 
 ### 4.3 Examples
 
@@ -859,6 +860,7 @@ PRO_CONTEXT__SERVER__TRANSPORT=http uvx pro-context
 
 | Header | Required | Description |
 |--------|----------|-------------|
+| `Authorization` | Yes | `Bearer <key>`. The key is either configured via `server.auth_key` or auto-generated at startup (logged to stderr). Missing or incorrect key → HTTP 401. |
 | `Content-Type` | Yes | `application/json` |
 | `MCP-Session-Id` | Yes (after init) | Session identifier returned in `initialize` response. Must be included on all subsequent requests in the session. |
 | `MCP-Protocol-Version` | Recommended | `2025-11-25` or `2025-03-26`. Validated if present; unknown version → HTTP 400. |
@@ -866,17 +868,20 @@ PRO_CONTEXT__SERVER__TRANSPORT=http uvx pro-context
 
 **Security constraints**:
 
-1. **Origin validation**: Requests with a non-localhost `Origin` header are rejected with HTTP 403. This prevents DNS rebinding attacks. Requests without an `Origin` header (standard API clients, curl) are allowed.
+1. **Bearer key authentication**: All HTTP requests must include `Authorization: Bearer <key>`. Requests with a missing or incorrect key are rejected with HTTP 401. The key is configured via `server.auth_key` in `pro-context.yaml` or the `PRO_CONTEXT__SERVER__AUTH_KEY` environment variable. If no key is configured, the server auto-generates a random key at startup and logs it to stderr. Stdio mode is unaffected — no authentication is required.
 
-2. **Protocol version validation**: If `MCP-Protocol-Version` is present and not in `{"2025-11-25", "2025-03-26"}`, the server returns HTTP 400.
+2. **Origin validation**: Requests with a non-localhost `Origin` header are rejected with HTTP 403. This prevents DNS rebinding attacks. Requests without an `Origin` header (standard API clients, curl) are allowed.
 
-3. **SSRF protection**: Applies to all documentation fetches, regardless of transport mode (see Section 6.2, `URL_NOT_ALLOWED`).
+3. **Protocol version validation**: If `MCP-Protocol-Version` is present and not in `{"2025-11-25", "2025-03-26"}`, the server returns HTTP 400.
+
+4. **SSRF protection**: Applies to all documentation fetches, regardless of transport mode (see Section 6.2, `URL_NOT_ALLOWED`).
 
 **Example POST request**:
 
 ```
 POST /mcp HTTP/1.1
 Host: localhost:8080
+Authorization: Bearer <key>
 Content-Type: application/json
 MCP-Session-Id: sess_abc123
 MCP-Protocol-Version: 2025-11-25
