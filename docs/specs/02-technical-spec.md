@@ -86,16 +86,16 @@ resolve-library("langchain-openai>=0.3")
   │
   ├─ Normalise: strip version/extras → "langchain-openai" → lowercase
   ├─ Index 1 (package → ID): "langchain-openai" → "langchain"  ✓
-  └─ Return [{ libraryId: "langchain", matchedVia: "package_name", relevance: 1.0 }]
+  └─ Return [{ library_id: "langchain", matched_via: "package_name", relevance: 1.0 }]
 
 get-library-docs("langchain")
   │
-  ├─ Registry lookup: "langchain" → llmsTxtUrl
+  ├─ Registry lookup: "langchain" → llms_txt_url
   ├─ Cache check: toc:langchain
   │    HIT (fresh)  → return cached content
   │    HIT (stale)  → return cached content + trigger background refresh
   │    MISS         → continue
-  ├─ Fetch: HTTP GET llmsTxtUrl (30s timeout, SSRF validated)
+  ├─ Fetch: HTTP GET llms_txt_url (30s timeout, SSRF validated)
   ├─ Store: toc_cache (TTL 24h)
   └─ Return: { content: "<raw llms.txt markdown>" }
 

@@ -148,6 +148,7 @@ All design decisions are captured here before implementation begins.
 2. **[Technical Specification](docs/specs/02-technical-spec.md)** — System architecture, data models, resolution algorithm, SQLite cache, heading parser, transports
 3. **[Implementation Guide](docs/specs/03-implementation-guide.md)** — Project structure, coding conventions, 6 implementation phases, testing strategy
 4. **[API Reference](docs/specs/04-api-reference.md)** — Formal MCP API: tool schemas, wire format examples, error codes, versioning policy
+5. **[Security Specification](docs/specs/05-security-spec.md)** — Threat model, trust boundaries, security controls, data handling, dependency management
 
 ### Implementation Roadmap
 
@@ -170,15 +171,7 @@ The server will support both **stdio** (local) and **HTTP** (remote) modes, inst
 
 ## Contributing
 
-Contributions are welcome!
-
-### How to Contribute
-
-1. **Review specifications**: Read through [`docs/specs/`](docs/specs/) and open issues for anything unclear or inconsistent
-2. **Code contributions**: Follow the [Implementation Guide](docs/specs/03-implementation-guide.md) — one module per phase, AppState injection pattern, ProContextError for all tool errors
-3. **Registry sources**: Suggest libraries or MCP servers that should be in the curated registry
-4. **Bug reports and fixes**: Open an issue describing the problem and steps to reproduce
-5. **Test coverage**: Additional tests using respx (HTTP mocking) and in-memory SQLite are welcome
+Contributions are welcome! See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup instructions, development workflow, coding conventions, and how to submit a pull request.
 
 ---
 

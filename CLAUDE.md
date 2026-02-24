@@ -26,13 +26,13 @@ Ankur has recently been working with Generative AI-based applications. Since thi
 ## Implementation Phases
 
 - ✅ **Phase 0**: Foundation — `pyproject.toml`, errors, models package, protocols, config, `AppState`, server skeleton, `RegistryIndexes` stub, `tools/` package
-- ⬜ **Phase 1**: Registry & Resolution — `load_registry()`, `build_indexes()`, `check_for_registry_update()`, `resolve-library` tool, fuzzy matching (rapidfuzz)
+- ✅ **Phase 1**: Registry & Resolution — `load_registry()`, `build_indexes()`, `resolve-library` tool, fuzzy matching (rapidfuzz)
 - ⬜ **Phase 2**: Fetcher & Cache — `get-library-docs` tool, httpx fetcher with SSRF protection, SQLite cache (aiosqlite), stale-while-revalidate
 - ⬜ **Phase 3**: Page Reading & Parser — `read-page` tool, heading parser, section extraction
 - ⬜ **Phase 4**: HTTP Transport — Streamable HTTP (MCP spec 2025-11-25), `MCPSecurityMiddleware`, uvicorn
 - ⬜ **Phase 5**: Registry Updates & Polish — background update check, cache cleanup scheduler, CI/CD, Docker, `uvx` packaging
 
-**Current state**: Phase 0 is complete. Source code lives in `src/pro_context/`. Phase 1 implementation is next.
+**Current state**: Phase 1 is complete. Source code lives in `src/pro_context/`. Phase 2 implementation is next.
 
 ### Active Specifications (`docs/specs/`)
 
@@ -64,7 +64,7 @@ _Expand this section as new phases are completed. Only add what Claude cannot in
 
 ```bash
 # Install dependencies and create virtualenv
-uv sync --extra dev
+uv sync --dev
 
 # Run the server (stdio transport)
 uv run pro-context

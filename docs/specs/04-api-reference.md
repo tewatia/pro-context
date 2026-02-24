@@ -205,14 +205,14 @@ Tool authors and MCP client implementors need to handle both. The agent should o
 
 ## 2. Tool: resolve-library
 
-**Purpose**: Resolve a library name or package identifier to a known documentation source. Always call this first to obtain a `libraryId` for use with `get-library-docs`.
+**Purpose**: Resolve a library name or package identifier to a known documentation source. Always call this first to obtain a `library_id` for use with `get-library-docs`.
 
 ### 2.1 Input Schema
 
 ```json
 {
   "name": "resolve-library",
-  "description": "Resolve a library name, package name, or alias to a known documentation source. Returns zero or more matches. Always the first step — establishes the libraryId used by subsequent tools.",
+  "description": "Resolve a library name, package name, or alias to a known documentation source. Returns zero or more matches. Always the first step — establishes the library_id used by subsequent tools.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -251,7 +251,7 @@ All matching is in-memory. No network calls.
       "items": {
         "type": "object",
         "properties": {
-          "libraryId": {
+          "library_id": {
             "type": "string",
             "description": "Stable identifier. Use in all subsequent tool calls.",
             "pattern": "^[a-z0-9][a-z0-9_-]*$"
@@ -265,11 +265,11 @@ All matching is in-memory. No network calls.
             "items": { "type": "string" },
             "description": "Languages this library supports, e.g. ['python'], ['javascript', 'typescript']."
           },
-          "docsUrl": {
+          "docs_url": {
             "type": ["string", "null"],
             "description": "Primary documentation site URL. Null if not in registry."
           },
-          "matchedVia": {
+          "matched_via": {
             "type": "string",
             "enum": ["package_name", "library_id", "alias", "fuzzy"],
             "description": "How the match was made."
@@ -281,7 +281,7 @@ All matching is in-memory. No network calls.
             "description": "Match confidence. 1.0 for exact matches; proportional to edit distance for fuzzy matches."
           }
         },
-        "required": ["libraryId", "name", "languages", "docsUrl", "matchedVia", "relevance"]
+        "required": ["library_id", "name", "languages", "docs_url", "matched_via", "relevance"]
       }
     }
   },
@@ -303,11 +303,11 @@ Result (`text` field, parsed):
 {
   "matches": [
     {
-      "libraryId": "langchain",
+      "library_id": "langchain",
       "name": "LangChain",
       "languages": ["python"],
-      "docsUrl": "https://docs.langchain.com",
-      "matchedVia": "package_name",
+      "docs_url": "https://docs.langchain.com",
+      "matched_via": "package_name",
       "relevance": 1.0
     }
   ]
@@ -326,11 +326,11 @@ Result (typo example — `"fasapi"` → `"fastapi"`):
 {
   "matches": [
     {
-      "libraryId": "fastapi",
+      "library_id": "fastapi",
       "name": "FastAPI",
       "languages": ["python"],
-      "docsUrl": "https://fastapi.tiangolo.com",
-      "matchedVia": "fuzzy",
+      "docs_url": "https://fastapi.tiangolo.com",
+      "matched_via": "fuzzy",
       "relevance": 0.92
     }
   ]
@@ -372,13 +372,13 @@ An empty `matches` list is a valid, non-error outcome. The library is simply not
   "inputSchema": {
     "type": "object",
     "properties": {
-      "libraryId": {
+      "library_id": {
         "type": "string",
         "description": "Library identifier from resolve-library.",
         "pattern": "^[a-z0-9][a-z0-9_-]*$"
       }
     },
-    "required": ["libraryId"]
+    "required": ["library_id"]
   }
 }
 ```
@@ -389,7 +389,7 @@ An empty `matches` list is a valid, non-error outcome. The library is simply not
 {
   "type": "object",
   "properties": {
-    "libraryId": {
+    "library_id": {
       "type": "string",
       "description": "The library identifier."
     },
@@ -405,7 +405,7 @@ An empty `matches` list is a valid, non-error outcome. The library is simply not
       "type": "boolean",
       "description": "True if this response was served from cache."
     },
-    "cachedAt": {
+    "cached_at": {
       "type": ["string", "null"],
       "format": "date-time",
       "description": "ISO 8601 timestamp of when the content was originally fetched. Null if not cached."
@@ -415,14 +415,14 @@ An empty `matches` list is a valid, non-error outcome. The library is simply not
       "description": "True if the cached entry has passed its TTL. Content is still valid but a background refresh has been triggered."
     }
   },
-  "required": ["libraryId", "name", "content", "cached", "cachedAt", "stale"]
+  "required": ["library_id", "name", "content", "cached", "cached_at", "stale"]
 }
 ```
 
 **Cache behaviour**:
 - TTL: 24 hours from fetch time.
 - **Stale-while-revalidate**: An expired entry is served immediately (`stale: true`) while a background refresh runs. The agent never waits for a network fetch on a cache hit.
-- `stale: true` does not indicate an error. The content is accurate as of `cachedAt`.
+- `stale: true` does not indicate an error. The content is accurate as of `cached_at`.
 
 ### 3.3 Examples
 
@@ -430,17 +430,17 @@ An empty `matches` list is a valid, non-error outcome. The library is simply not
 
 Request arguments:
 ```json
-{ "libraryId": "langchain" }
+{ "library_id": "langchain" }
 ```
 
 Result:
 ```json
 {
-  "libraryId": "langchain",
+  "library_id": "langchain",
   "name": "LangChain",
   "content": "# Docs by LangChain\n\n## Concepts\n\n- [Chat Models](https://docs.langchain.com/docs/concepts/chat_models.md): Interface for language models that take messages as input and return messages as output.\n- [Streaming](https://docs.langchain.com/docs/concepts/streaming.md): Stream model outputs as they are generated.\n\n## How-to Guides\n\n- [How to return structured data from a model](https://docs.langchain.com/docs/how_to/structured_output.md): ...\n\n## API Reference\n\n- [BaseChatModel](https://api.python.langchain.com/en/latest/language_models/langchain_core.language_models.chat_models.BaseChatModel.md): ...\n",
   "cached": false,
-  "cachedAt": null,
+  "cached_at": null,
   "stale": false
 }
 ```
@@ -449,11 +449,11 @@ Result:
 
 ```json
 {
-  "libraryId": "langchain",
+  "library_id": "langchain",
   "name": "LangChain",
   "content": "...",
   "cached": true,
-  "cachedAt": "2026-02-23T10:00:00Z",
+  "cached_at": "2026-02-23T10:00:00Z",
   "stale": false
 }
 ```
@@ -462,11 +462,11 @@ Result:
 
 ```json
 {
-  "libraryId": "langchain",
+  "library_id": "langchain",
   "name": "LangChain",
   "content": "...",
   "cached": true,
-  "cachedAt": "2026-02-22T10:00:00Z",
+  "cached_at": "2026-02-22T10:00:00Z",
   "stale": true
 }
 ```
@@ -475,10 +475,10 @@ Result:
 
 | Condition | Error code | `recoverable` |
 |-----------|-----------|---------------|
-| `libraryId` not found in registry | `LIBRARY_NOT_FOUND` | `false` |
+| `library_id` not found in registry | `LIBRARY_NOT_FOUND` | `false` |
 | Network error fetching llms.txt | `LLMS_TXT_FETCH_FAILED` | `true` |
 | HTTP non-200 fetching llms.txt | `LLMS_TXT_FETCH_FAILED` | `true` |
-| `libraryId` fails pattern validation | `INVALID_INPUT` | `false` |
+| `library_id` fails pattern validation | `INVALID_INPUT` | `false` |
 
 **`LIBRARY_NOT_FOUND` example**:
 ```json
@@ -563,10 +563,10 @@ Result:
       "description": "Full page markdown."
     },
     "cached": { "type": "boolean" },
-    "cachedAt": { "type": ["string", "null"], "format": "date-time" },
+    "cached_at": { "type": ["string", "null"], "format": "date-time" },
     "stale": { "type": "boolean" }
   },
-  "required": ["url", "headings", "content", "cached", "cachedAt", "stale"]
+  "required": ["url", "headings", "content", "cached", "cached_at", "stale"]
 }
 ```
 
@@ -593,7 +593,7 @@ Result:
   ],
   "content": "# Streaming\n\n## Overview\n\nLangChain supports streaming...\n\n## Streaming with Chat Models\n...",
   "cached": false,
-  "cachedAt": null,
+  "cached_at": null,
   "stale": false
 }
 ```
@@ -683,20 +683,20 @@ The `text` field (parsed):
 {
   "type": "object",
   "properties": {
-    "resolvedLibraries": {
+    "resolved_libraries": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "libraryId": { "type": "string" },
+          "library_id": { "type": "string" },
           "name": { "type": "string" },
-          "resolvedAt": { "type": "string", "format": "date-time" }
+          "resolved_at": { "type": "string", "format": "date-time" }
         },
-        "required": ["libraryId", "name", "resolvedAt"]
+        "required": ["library_id", "name", "resolved_at"]
       }
     }
   },
-  "required": ["resolvedLibraries"]
+  "required": ["resolved_libraries"]
 }
 ```
 
@@ -704,16 +704,16 @@ The `text` field (parsed):
 
 ```json
 {
-  "resolvedLibraries": [
+  "resolved_libraries": [
     {
-      "libraryId": "langchain",
+      "library_id": "langchain",
       "name": "LangChain",
-      "resolvedAt": "2026-02-23T10:00:00Z"
+      "resolved_at": "2026-02-23T10:00:00Z"
     },
     {
-      "libraryId": "pydantic",
+      "library_id": "pydantic",
       "name": "Pydantic",
-      "resolvedAt": "2026-02-23T10:05:00Z"
+      "resolved_at": "2026-02-23T10:05:00Z"
     }
   ]
 }
@@ -783,7 +783,7 @@ This envelope is returned inside the MCP `result` content with `isError: true` �
 
 | Code | Raised by | Description | `recoverable` |
 |------|-----------|-------------|---------------|
-| `LIBRARY_NOT_FOUND` | `get-library-docs` | `libraryId` is valid syntax but not present in the registry | `false` |
+| `LIBRARY_NOT_FOUND` | `get-library-docs` | `library_id` is valid syntax but not present in the registry | `false` |
 | `LLMS_TXT_FETCH_FAILED` | `get-library-docs` | Network error, timeout, or non-200 HTTP response when fetching the llms.txt URL | `true` |
 | `PAGE_NOT_FOUND` | `read-page` | HTTP 404 for the requested URL | `false` |
 | `PAGE_FETCH_FAILED` | `read-page` | Network error, timeout, non-200/404 HTTP response, or too many redirects | `true` |
@@ -792,7 +792,7 @@ This envelope is returned inside the MCP `result` content with `isError: true` �
 
 **On `recoverable: true`**: The same request may succeed if retried after a brief delay. Network errors and upstream failures are the typical cause. The agent should inform the user rather than retry indefinitely.
 
-**On `recoverable: false`**: Retrying the identical request will not succeed. The agent must take a different action (e.g. use `resolve-library` to find a valid `libraryId`, or check the URL is from a known documentation domain).
+**On `recoverable: false`**: Retrying the identical request will not succeed. The agent must take a different action (e.g. use `resolve-library` to find a valid `library_id`, or check the URL is from a known documentation domain).
 
 ---
 

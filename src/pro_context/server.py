@@ -3,7 +3,7 @@
 Responsibilities (and nothing more):
 - Configure structlog
 - Create AppState via the FastMCP lifespan context manager
-- Register tools (added in later phases)
+- Register tools
 - Start the correct transport (stdio or HTTP)
 """
 
@@ -15,10 +15,12 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 import structlog
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
+import pro_context.tools.resolve_library as t_resolve
 from pro_context import __version__
 from pro_context.config import Settings
+from pro_context.registry import build_indexes, load_registry
 from pro_context.state import AppState
 
 if TYPE_CHECKING:
@@ -75,9 +77,23 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
         transport=settings.server.transport,
     )
 
-    state = AppState(settings=settings)
+    # Phase 1: Load registry and build indexes
+    entries, version = load_registry()
+    indexes = build_indexes(entries)
 
-    log.info("server_started", version=__version__, transport=settings.server.transport)
+    state = AppState(
+        settings=settings,
+        indexes=indexes,
+        registry_version=version,
+    )
+
+    log.info(
+        "server_started",
+        version=__version__,
+        transport=settings.server.transport,
+        registry_entries=len(entries),
+        registry_version=version,
+    )
 
     try:
         yield state
@@ -86,15 +102,21 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
 
 
 # ---------------------------------------------------------------------------
-# FastMCP instance
+# FastMCP instance and tool registration
 # ---------------------------------------------------------------------------
 
 mcp = FastMCP("pro-context", lifespan=lifespan)
 
-# Tools are registered in later phases:
-#   Phase 1 — resolve_library
-#   Phase 2 — get_library_docs
-#   Phase 3 — read_page
+
+@mcp.tool()
+async def resolve_library(query: str, ctx: Context) -> dict:
+    """Resolve a library name or package name to a known documentation source."""
+    state: AppState = ctx.request_context.lifespan_context
+    return await t_resolve.handle(query, state)
+
+
+# Phase 2 — get_library_docs
+# Phase 3 — read_page
 
 
 # ---------------------------------------------------------------------------

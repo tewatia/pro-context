@@ -30,7 +30,7 @@ class AppState:
     settings: Settings
 
     # Phase 1: Registry & Resolution
-    indexes: RegistryIndexes | None = None
+    indexes: RegistryIndexes
     registry_version: str = ""
 
     # Phase 2: Fetcher & Cache

@@ -64,7 +64,7 @@ Pro-Context exposes three MCP tools. All tools are async and return structured J
 
 ### 4.1 resolve-library
 
-**Purpose**: Resolve a library name or package name to a known documentation source. Always the first step — establishes the `libraryId` used by subsequent tools.
+**Purpose**: Resolve a library name or package name to a known documentation source. Always the first step — establishes the `library_id` used by subsequent tools.
 
 **Input**:
 
@@ -88,11 +88,11 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 {
   "matches": [
     {
-      "libraryId": "langchain",
+      "library_id": "langchain",
       "name": "LangChain",
       "languages": ["python"],
-      "docsUrl": "https://docs.langchain.com",
-      "matchedVia": "package_name",
+      "docs_url": "https://docs.langchain.com",
+      "matched_via": "package_name",
       "relevance": 1.0
     }
   ]
@@ -101,11 +101,11 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 
 | Field | Description |
 |-------|-------------|
-| `libraryId` | Stable identifier used in all subsequent tool calls |
+| `library_id` | Stable identifier used in all subsequent tool calls |
 | `name` | Human-readable display name |
 | `languages` | Languages this library supports |
-| `docsUrl` | Primary documentation site URL |
-| `matchedVia` | How the match was made: `"package_name"`, `"library_id"`, `"alias"`, `"fuzzy"` |
+| `docs_url` | Primary documentation site URL |
+| `matched_via` | How the match was made: `"package_name"`, `"library_id"`, `"alias"`, `"fuzzy"` |
 | `relevance` | 0.0–1.0. Exact matches are 1.0; fuzzy matches are proportional to edit distance |
 
 **Notes**:
@@ -123,23 +123,23 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `libraryId` | string | Yes | Library identifier from `resolve-library` |
+| `library_id` | string | Yes | Library identifier from `resolve-library` |
 
 **Processing**:
-1. Look up `libraryId` in registry → get `llmsTxtUrl`
-2. Check SQLite cache for `toc:{libraryId}` — if fresh, return cached entry
-3. On cache miss: HTTP GET `llmsTxtUrl`, store raw content in SQLite cache (TTL: 24 hours)
+1. Look up `library_id` in registry → get `llms_txt_url`
+2. Check SQLite cache for `toc:{library_id}` — if fresh, return cached entry
+3. On cache miss: HTTP GET `llms_txt_url`, store raw content in SQLite cache (TTL: 24 hours)
 4. Return raw content
 
 **Output**:
 
 ```json
 {
-  "libraryId": "langchain",
+  "library_id": "langchain",
   "name": "LangChain",
   "content": "# Docs by LangChain\n\n## Concepts\n\n- [Chat Models](https://...): Interface for language models...\n- [Streaming](https://...): Stream model outputs...\n\n## API Reference\n\n- [Create Deployment](https://...): Create a new deployment.\n",
   "cached": false,
-  "cachedAt": null,
+  "cached_at": null,
   "stale": false
 }
 ```
@@ -148,7 +148,7 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 |-------|-------------|
 | `content` | Raw llms.txt content as markdown. The agent reads this directly to understand available documentation and extract URLs to pass to `read-page` |
 | `cached` | Whether this response was served from cache |
-| `cachedAt` | ISO 8601 timestamp (UTC) of when the content was originally fetched. `null` if not cached |
+| `cached_at` | ISO 8601 timestamp (UTC) of when the content was originally fetched. `null` if not cached |
 | `stale` | `true` if the content is past its TTL and a background refresh has been triggered. The content is still valid but may be slightly outdated. Always present; defaults to `false` |
 
 **Notes**:
@@ -188,7 +188,7 @@ All matching is against in-memory indexes loaded from the registry at startup. N
   ],
   "content": "# Streaming\n\n## Overview\n...",
   "cached": true,
-  "cachedAt": "2026-02-22T10:00:00Z"
+  "cached_at": "2026-02-22T10:00:00Z"
 }
 ```
 
@@ -199,7 +199,7 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 | `headings[].line` | 1-based line number where the heading appears in the page content |
 | `content` | Full page markdown |
 | `cached` | Whether this response was served from cache |
-| `cachedAt` | ISO 8601 timestamp (UTC) of when the content was originally fetched. `null` if not cached |
+| `cached_at` | ISO 8601 timestamp (UTC) of when the content was originally fetched. `null` if not cached |
 | `stale` | `true` if the content is past its TTL and a background refresh has been triggered. Always present; defaults to `false` |
 
 **Notes**:
@@ -295,7 +295,7 @@ A single SQLite database (`cache.db`) stores all fetched content.
 
 | Table | Key | Content | TTL |
 |-------|-----|---------|-----|
-| `toc_cache` | `toc:{libraryId}` | Raw llms.txt content | 24 hours |
+| `toc_cache` | `toc:{library_id}` | Raw llms.txt content | 24 hours |
 | `page_cache` | `page:{sha256(url)}` | Full page markdown | 24 hours |
 
 **Stale-while-revalidate**: When a cached entry is past its TTL, it is served immediately with `cached: true` and `stale: true`, and a background task re-fetches the content. This ensures the agent never waits for a network fetch on a cache hit, even if the content is slightly outdated.
@@ -318,7 +318,7 @@ A single SQLite database (`cache.db`) stores all fetched content.
 `read-page` accepts arbitrary URLs from the agent. To prevent Server-Side Request Forgery:
 
 - All URLs are validated against an allowlist of permitted domains before fetching
-- The allowlist is populated at startup from the registry (all `docsUrl` and `llmsTxtUrl` domains)
+- The allowlist is populated at startup from the registry (all `docs_url` and `llms_txt_url` domains)
 - Redirects are followed manually — each redirect target is re-validated before following
 - Private IP ranges (`10.x`, `172.16.x`, `192.168.x`, `127.x`, `::1`) are always blocked, regardless of allowlist
 
@@ -361,7 +361,7 @@ Every error response follows the same structure:
 
 | Code | Tool | `recoverable` | Description |
 |------|------|--------------|-------------|
-| `LIBRARY_NOT_FOUND` | `get-library-docs` | `false` | `libraryId` not in registry; retrying won't help |
+| `LIBRARY_NOT_FOUND` | `get-library-docs` | `false` | `library_id` not in registry; retrying won't help |
 | `LLMS_TXT_FETCH_FAILED` | `get-library-docs` | `true` | Transient network error or non-200 fetching llms.txt; retry may succeed |
 | `PAGE_NOT_FOUND` | `read-page` | `false` | HTTP 404 — the page does not exist at that URL |
 | `PAGE_FETCH_FAILED` | `read-page` | `true` | Transient network error fetching page; retry may succeed |
