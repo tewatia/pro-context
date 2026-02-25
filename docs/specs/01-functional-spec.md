@@ -301,6 +301,7 @@ The library registry (`known-libraries.json`) is the data backbone of ProContext
 - Both transports perform one registry update check at startup
 - In HTTP long-running mode, successful checks follow a steady 24-hour cadence
 - In HTTP long-running mode, **transient** failures (network timeout/DNS/connection issues, upstream 5xx) retry with exponential backoff (starting at 1 minute, capped at 60 minutes, with jitter)
+- In HTTP long-running mode, after `8` consecutive transient failures, fast retries are suspended and checks return to 24-hour cadence until the next successful check
 - In HTTP long-running mode, **semantic** failures (invalid metadata shape, checksum mismatch, registry schema parse errors) do not fast-retry; they log and return to the normal 24-hour cadence
 - In stdio mode, no post-startup retries are scheduled because the process is short-lived
 
