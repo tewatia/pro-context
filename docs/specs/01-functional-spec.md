@@ -163,68 +163,57 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 
 ### 4.3 read_page
 
-**Purpose**: Fetch the full content of a specific documentation page and its heading structure.
+**Purpose**: Fetch the content of a documentation page with line-number navigation. Returns a heading map of the full page and a windowed slice of the content controlled by `offset` and `limit`.
 
 **Input**:
 
-| Parameter | Type   | Required | Description                                                               |
-| --------- | ------ | -------- | ------------------------------------------------------------------------- |
-| `url`     | string | Yes      | URL of the documentation page, typically from `get_library_docs` sections |
+| Parameter | Type    | Required | Default | Description                                                                                     |
+| --------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `url`     | string  | Yes      | —       | URL of the documentation page, typically from `get_library_docs` sections                       |
+| `offset`  | integer | No       | 1       | 1-based line number to start reading from. Use a heading's line number to jump to that section. |
+| `limit`   | integer | No       | 2000    | Maximum number of lines to return from the offset.                                              |
 
 **Processing**:
 
-1. Validate URL against SSRF allowlist
+1. Validate URL against SSRF allowlist; validate `offset` >= 1, `limit` >= 1
 2. Check SQLite cache for `page:{sha256(url)}` — if fresh, return from cache
-3. On cache miss: HTTP GET the URL, store full content in SQLite cache (TTL: 24 hours)
-4. Parse markdown: extract heading tree with line numbers
-5. Return content and heading structure
+3. On cache miss: HTTP GET the URL, parse headings, store full content + headings in SQLite cache (TTL: 24 hours)
+4. Build plain-text heading map from full page (always complete, regardless of offset/limit)
+5. Slice content to the requested window (`offset`/`limit`)
+6. Return heading map, windowed content, and pagination metadata
+
+**Navigation workflow**: Call `read_page` with just the URL to get the heading map and the first 2000 lines. Inspect headings to find the section you need. Call again with `offset` set to that heading's line number to jump there.
 
 **Output**:
 
 ```json
 {
   "url": "https://docs.langchain.com/docs/concepts/streaming.md",
-  "headings": [
-    { "level": 1, "title": "Streaming", "anchor": "streaming", "line": 1 },
-    { "level": 2, "title": "Overview", "anchor": "overview", "line": 3 },
-    {
-      "level": 2,
-      "title": "Streaming with Chat Models",
-      "anchor": "streaming-with-chat-models",
-      "line": 12
-    },
-    {
-      "level": 3,
-      "title": "Using .stream()",
-      "anchor": "using-stream",
-      "line": 18
-    },
-    {
-      "level": 2,
-      "title": "Streaming with Chains",
-      "anchor": "streaming-with-chains",
-      "line": 35
-    }
-  ],
+  "headings": "1: # Streaming\n3: ## Overview\n12: ## Streaming with Chat Models\n18: ### Using .stream()\n27: ### Using .astream()\n35: ## Streaming with Chains",
+  "total_lines": 42,
+  "offset": 1,
+  "limit": 2000,
   "content": "# Streaming\n\n## Overview\n...",
-  "cached": true,
-  "cached_at": "2026-02-22T10:00:00Z"
+  "cached": false,
+  "cached_at": null,
+  "stale": false
 }
 ```
 
-| Field               | Description                                                                                                                                                                                                                                                                                           |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `headings`          | All headings on the page in document order (top to bottom). Each entry includes `level` (1–4), `title`, `anchor`, and `line`                                                                                                                                                                          |
-| `headings[].anchor` | Slugified heading title for constructing deep links (e.g., `"streaming-with-chat-models"`). Format: lowercase, punctuation removed, spaces and underscores replaced with hyphens, consecutive hyphens collapsed. Duplicate anchors within a page are suffixed: `-2`, `-3`, etc. This format is stable |
-| `headings[].line`   | 1-based line number where the heading appears in the page content                                                                                                                                                                                                                                     |
-| `content`           | Full page markdown                                                                                                                                                                                                                                                                                    |
-| `cached`            | Whether this response was served from cache                                                                                                                                                                                                                                                           |
-| `cached_at`         | ISO 8601 timestamp (UTC) of when the content was originally fetched. `null` if not cached                                                                                                                                                                                                             |
-| `stale`             | `true` if the content is past its TTL and a background refresh has been triggered. Always present; defaults to `false`                                                                                                                                                                                |
+| Field         | Description                                                                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `headings`    | Plain-text heading map of the full page (always complete, regardless of offset/limit). Each line: `<line_number>: <heading line>`. Only H1–H4 included.  |
+| `total_lines` | Total number of lines in the full page. Useful for determining if more content exists beyond the current window.                                          |
+| `offset`      | The 1-based line number the returned content starts from.                                                                                                 |
+| `limit`       | The maximum number of lines requested.                                                                                                                    |
+| `content`     | Page markdown for the requested window (from offset, up to limit lines). May be shorter than limit if the page ends before the window fills.              |
+| `cached`      | Whether this response was served from cache                                                                                                               |
+| `cached_at`   | ISO 8601 timestamp (UTC) of when the content was originally fetched. `null` if not cached                                                                 |
+| `stale`       | `true` if the content is past its TTL and a background refresh has been triggered. Always present; defaults to `false`                                    |
 
 **Notes**:
 
-- The full page is cached on first fetch. Subsequent calls are served from cache — no re-fetch.
+- The full page and headings are cached together on first fetch. Subsequent calls with different offsets are served from cache — no re-fetch or re-parse.
 - URLs must be from the allowlist. See Section 8.
 
 ---

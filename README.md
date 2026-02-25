@@ -8,7 +8,7 @@
 
 ProContext is an open-source [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that will deliver accurate, fresh documentation to AI coding agents like Claude Code, Cursor, and Windsurf. It prevents hallucinated APIs by serving real documentation from Python libraries, MCP servers, GitHub projects, and any source that publishes [llms.txt](https://llmstxt.org) files.
 
-> ⚠️ **Project Status**: **Phase 1 complete** (registry & resolution implemented). Phase 2 (fetcher & cache) is next. Not yet usable — see [Development Status](#development-status) below.
+> ⚠️ **Project Status**: **Phase 2 complete** (registry, resolution, fetcher & cache implemented). Phase 3 (page reading & parser) is next. Not yet usable — see [Development Status](#development-status) below.
 
 ---
 
@@ -66,7 +66,7 @@ Existing documentation tools fall into two categories, each with limitations:
 
 ### 🔍 **Agent-Driven Navigation**
 
-- The agent reads the table of contents (`get-library-docs`) and navigates to specific pages (`read-page`)
+- The agent reads the table of contents (`get_library_docs`) and navigates to specific pages (`read_page`)
 - No server-side keyword search or query interpretation — the agent's LLM already knows what it's looking for
 - Gives agents full control over what they read and in what order
 
@@ -136,15 +136,15 @@ ProContext uses a **registry-first, lazy-fetch** architecture:
 
 ## Development Status
 
-**Current Phase**: Phase 2 — Fetcher & Cache
+**Current Phase**: Phase 3 — Page Reading & Parser
 
-Phases 0 and 1 are complete. The server skeleton, configuration, data models, registry loader, fuzzy resolver, and `resolve-library` tool are all implemented in `src/procontext/`. Phase 2 will implement the `get-library-docs` tool, the httpx fetcher with SSRF protection, and the SQLite cache.
+Phases 0 through 2 are complete. The server skeleton, configuration, data models, registry loader, fuzzy resolver, `resolve_library` tool, httpx fetcher with SSRF protection, SQLite cache with stale-while-revalidate, and `get_library_docs` tool are all implemented in `src/procontext/`. Phase 3 will implement the `read_page` tool and the heading parser.
 
 ### Specification Documents (`docs/specs/`)
 
 All design decisions are captured here before implementation begins.
 
-1. **[Functional Specification](docs/specs/01-functional-spec.md)** — Problem statement, 3 MCP tools (`resolve-library`, `get-library-docs`, `read-page`), security model, design decisions
+1. **[Functional Specification](docs/specs/01-functional-spec.md)** — Problem statement, 3 MCP tools (`resolve_library`, `get_library_docs`, `read_page`), security model, design decisions
 2. **[Technical Specification](docs/specs/02-technical-spec.md)** — System architecture, data models, resolution algorithm, SQLite cache, heading parser, transports
 3. **[Implementation Guide](docs/specs/03-implementation-guide.md)** — Project structure, coding conventions, 6 implementation phases, testing strategy
 4. **[API Reference](docs/specs/04-api-reference.md)** — Formal MCP API: tool schemas, wire format examples, error codes, versioning policy
@@ -153,9 +153,9 @@ All design decisions are captured here before implementation begins.
 ### Implementation Roadmap
 
 - ✅ **Phase 0**: Foundation — server skeleton, config, logging, errors, models, protocols, `AppState`
-- ✅ **Phase 1**: Registry & Resolution — `load_registry()`, `resolve-library` tool, fuzzy matching
-- ⬜ **Phase 2**: Fetcher & Cache — `get-library-docs` tool, httpx fetcher, SQLite cache
-- ⬜ **Phase 3**: Page Reading & Parser — `read-page` tool, heading parser, section extraction
+- ✅ **Phase 1**: Registry & Resolution — `load_registry()`, `resolve_library` tool, fuzzy matching
+- ✅ **Phase 2**: Fetcher & Cache — `get_library_docs` tool, httpx fetcher with SSRF protection, SQLite cache with stale-while-revalidate
+- ⬜ **Phase 3**: Page Reading & Parser — `read_page` tool, heading parser, section extraction
 - ⬜ **Phase 4**: HTTP Transport — Streamable HTTP, `MCPSecurityMiddleware`, uvicorn
 - ⬜ **Phase 5**: Registry Updates & Polish — background updates, cache cleanup, CI/CD, Docker, `uvx` packaging
 
@@ -163,7 +163,7 @@ All design decisions are captured here before implementation begins.
 
 ## Installation
 
-> 🚧 **Coming Soon** — Installation instructions will be added once Phase 2 (`get-library-docs`) is complete and the server can deliver end-to-end documentation responses.
+> 🚧 **Coming Soon** — Installation instructions will be added once Phase 2 (`get_library_docs`) is complete and the server can deliver end-to-end documentation responses.
 
 The server will support both **stdio** (local) and **HTTP** (remote) modes, installable via `uvx` or pip, and configurable for Claude Code, Cursor, Windsurf, and other MCP clients.
 
@@ -227,7 +227,5 @@ ProContext was created to solve the accuracy problem in AI coding agents by prov
 <div align="center">
 
 **Built with ❤️ for AI coding agents**
-
-⭐ Star this repo if you find it useful!
 
 </div>

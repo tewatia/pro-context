@@ -26,19 +26,19 @@ Ankur has recently been working with Generative AI-based applications. Since thi
 ## Implementation Phases
 
 - ✅ **Phase 0**: Foundation — `pyproject.toml`, errors, models package, protocols, config, `AppState`, server skeleton, `RegistryIndexes` stub, `tools/` package
-- ✅ **Phase 1**: Registry & Resolution — `load_registry()`, `build_indexes()`, `resolve-library` tool, fuzzy matching (rapidfuzz)
-- ⬜ **Phase 2**: Fetcher & Cache — `get-library-docs` tool, httpx fetcher with SSRF protection, SQLite cache (aiosqlite), stale-while-revalidate
-- ⬜ **Phase 3**: Page Reading & Parser — `read-page` tool, heading parser, section extraction
+- ✅ **Phase 1**: Registry & Resolution — `load_registry()`, `build_indexes()`, `resolve_library` tool, fuzzy matching (rapidfuzz)
+- ✅ **Phase 2**: Fetcher & Cache — `get_library_docs` tool, httpx fetcher with SSRF protection, SQLite cache (aiosqlite), stale-while-revalidate
+- ⬜ **Phase 3**: Page Reading & Parser — `read_page` tool, heading parser, section extraction
 - ⬜ **Phase 4**: HTTP Transport — Streamable HTTP (MCP spec 2025-11-25), `MCPSecurityMiddleware`, uvicorn
 - ⬜ **Phase 5**: Registry Updates & Polish — background update check, cache cleanup scheduler, CI/CD, Docker, `uvx` packaging
 
-**Current state**: Phase 1 is complete. Source code lives in `src/procontext/`. Phase 2 implementation is next.
+**Current state**: Phase 2 is complete. Source code lives in `src/procontext/`. Phase 3 implementation is next.
 
 ### Active Specifications (`docs/specs/`)
 
 These are the authoritative design documents for the current open-source version.
 
-- `docs/specs/01-functional-spec.md` — Problem statement, 3 MCP tools (`resolve-library`, `get-library-docs`, `read-page`), 1 resource, transport modes, registry, SQLite cache, security model, design decisions
+- `docs/specs/01-functional-spec.md` — Problem statement, 3 MCP tools (`resolve_library`, `get_library_docs`, `read_page`), 1 resource, transport modes, registry, SQLite cache, security model, design decisions
 - `docs/specs/02-technical-spec.md` — System architecture, technology stack, data models (Pydantic), in-memory registry indexes, resolution algorithm, fetcher (httpx + SSRF), SQLite cache schema, heading parser, stdio + Streamable HTTP transport, registry update mechanism, configuration, logging
 - `docs/specs/03-implementation-guide.md` — Project structure, pyproject.toml, coding conventions (AppState injection, ProContextError pattern, logging guidance), 6 implementation phases with per-phase file tables, testing strategy (respx + in-memory SQLite), CI/CD
 - `docs/specs/04-api-reference.md` — Formal MCP API: tool definitions (JSON Schema + wire format examples), resource schema, full error code catalogue, stdio and HTTP transport reference, versioning policy

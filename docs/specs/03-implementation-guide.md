@@ -483,27 +483,28 @@ echo '{}' | uv run procontext  # Responds without crash
 
 ### Phase 3: Page Reading & Parser
 
-**Goal**: `read_page` tool is fully functional. Heading parser handles code blocks, line number tracking, and anchor deduplication correctly.
+**Goal**: `read_page` tool is fully functional. Heading parser handles code blocks and line number tracking correctly. Offset/limit windowing works for targeted section reads.
 
 **Files to create/update**:
 
-| File                                | What to implement                                |
-| ----------------------------------- | ------------------------------------------------ |
-| `src/procontext/parser.py`          | `parse_headings()`, `_make_anchor()`             |
-| `src/procontext/models/tools.py`    | Add `Heading`, `ReadPageInput`, `ReadPageOutput` |
-| `src/procontext/models/__init__.py` | Re-export new models                             |
-| `src/procontext/tools/read_page.py` | `handle(url, state) -> dict`                     |
-| `src/procontext/server.py`          | Register `read_page` tool                        |
-| `tests/unit/test_parser.py`         | See testing section                              |
-| `tests/integration/test_tools.py`   | End-to-end tool call tests for all three tools   |
+| File                                | What to implement                                                            |
+| ----------------------------------- | ---------------------------------------------------------------------------- |
+| `src/procontext/parser.py`          | `parse_headings()` — returns plain-text heading map                          |
+| `src/procontext/tools/read_page.py` | `handle(url, offset, limit, state) -> dict`                                  |
+| `src/procontext/server.py`          | Register `read_page` tool                                                    |
+| `tests/unit/test_parser.py`         | See testing section                                                          |
+| `tests/integration/test_tools.py`   | End-to-end tool call tests for all three tools                               |
+
+**Note**: `ReadPageInput`, `ReadPageOutput`, and `PageCacheEntry` (with `headings` field) were already added in Phase 2.
 
 **Key behaviours to verify**:
 
 - `#>` inside code block is not detected as heading
 - `# comment` inside code block is not detected as heading
 - Heading at any level (H1–H4) outside code block is detected with correct `line` number
-- Repeated heading titles produce deduplicated anchors (`browser-mode`, `browser-mode-2`, `browser-mode-3`)
-- Page is cached on first fetch; subsequent calls are served from cache without re-fetch
+- Page is cached on first fetch; subsequent calls with different offsets are served from cache without re-fetch
+- `offset` and `limit` correctly window the content
+- `headings` always reflects the full page regardless of offset/limit
 
 ---
 

@@ -193,6 +193,7 @@ class PageCacheEntry(BaseModel):
     url: str
     url_hash: str             # SHA-256 of url (primary key)
     content: str              # Full page markdown
+    headings: str             # Plain-text heading map: "<line>: <heading>\n..."
     fetched_at: datetime
     expires_at: datetime
     stale: bool = False
@@ -237,14 +238,10 @@ class GetLibraryDocsOutput(BaseModel):
     cached_at: datetime | None
     stale: bool = False
 
-class Heading(BaseModel):
-    title: str
-    level: int                # 1–4 (maps to H1–H4)
-    anchor: str               # Slugified, deduplicated (useful for constructing deep links)
-    line: int                 # 1-based line number where the heading appears in the page
-
 class ReadPageInput(BaseModel):
     url: str
+    offset: int = 1
+    limit: int = 2000
 
     @field_validator("url")
     @classmethod
@@ -256,10 +253,27 @@ class ReadPageInput(BaseModel):
             raise ValueError("url must use http or https scheme")
         return v
 
+    @field_validator("offset")
+    @classmethod
+    def validate_offset(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("offset must be >= 1")
+        return v
+
+    @field_validator("limit")
+    @classmethod
+    def validate_limit(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("limit must be >= 1")
+        return v
+
 class ReadPageOutput(BaseModel):
     url: str
-    headings: list[Heading]
-    content: str              # Full page markdown
+    headings: str             # Plain-text heading map: "<line>: <heading>\n..."
+    total_lines: int
+    offset: int
+    limit: int
+    content: str              # Page markdown for the requested window
     cached: bool
     cached_at: datetime | None
     stale: bool = False
@@ -588,6 +602,7 @@ CREATE TABLE IF NOT EXISTS page_cache (
     url_hash    TEXT PRIMARY KEY,             -- SHA-256(url)
     url         TEXT NOT NULL UNIQUE,
     content     TEXT NOT NULL,
+    headings    TEXT NOT NULL DEFAULT '',     -- Plain-text heading map
     fetched_at  TEXT NOT NULL,
     expires_at  TEXT NOT NULL
 );
@@ -662,20 +677,30 @@ async def set_toc(self, library_id: str, ...) -> None:
 
 ## 7. Heading Parser
 
-The heading parser is used exclusively by `read_page`. It produces the `headings` list, including the 1-based line number of each heading. Defined in `src/procontext/parser.py`.
+The heading parser is used exclusively by `read_page`. It produces a plain-text heading map with 1-based line numbers for each heading (H1–H4). Defined in `src/procontext/parser.py`.
+
+The output format is a newline-separated string where each line is `<line_number>: <heading line>`, e.g.:
+
+```
+1: # Streaming
+3: ## Overview
+12: ## Streaming with Chat Models
+18: ### Using .stream()
+```
+
+This plain-text format is compact and directly navigable — the agent reads line numbers from the heading map and passes them as `offset` to `read_page` for targeted section reads.
 
 ### 7.1 Algorithm
 
-Three rules applied in a single pass:
+Two rules applied in a single pass:
 
 **Rule 1 — Code block tracking**
 
 Suppress heading detection inside fenced code blocks. A block opens on a line starting with ` ``` ` or `~~~` and closes on the next line starting with the same fence string. Heading detection is disabled between open and close.
 
 ````python
-def parse_headings(content: str) -> list[Heading]:
-    headings: list[Heading] = []
-    anchor_counts: dict[str, int] = {}
+def parse_headings(content: str) -> str:
+    lines: list[str] = []
 
     in_code_block = False
     fence: str | None = None
@@ -697,35 +722,14 @@ def parse_headings(content: str) -> list[Heading]:
         if in_code_block:
             continue
 
-        # Rule 2: heading detection
+        # Rule 2: heading detection (H1–H4)
         match = re.match(r"^(#{1,4}) (.+)", line)
         if not match:
             continue
 
-        level = len(match.group(1))
-        title = match.group(2).strip()
+        lines.append(f"{lineno}: {line}")
 
-        # Rule 3: anchor generation and deduplication
-        anchor = _make_anchor(title)
-        if anchor in anchor_counts:
-            anchor_counts[anchor] += 1
-            anchor = f"{anchor}-{anchor_counts[anchor]}"
-        else:
-            anchor_counts[anchor] = 1
-
-        headings.append(Heading(title=title, level=level, anchor=anchor, line=lineno))
-
-    return headings
-
-
-def _make_anchor(title: str) -> str:
-    """GitHub-compatible anchor generation."""
-    anchor = title.lower()
-    anchor = re.sub(r"[^\w\s-]", "", anchor)   # remove punctuation
-    anchor = re.sub(r"[\s_]+", "-", anchor)     # spaces/underscores → hyphens
-    anchor = re.sub(r"-+", "-", anchor)         # collapse multiple hyphens
-    anchor = anchor.strip("-")
-    return anchor or "section"
+    return "\n".join(lines)
 ````
 
 **What is deliberately excluded**:
