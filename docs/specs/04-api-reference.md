@@ -495,8 +495,9 @@ Result:
 | Condition                             | Error code              | `recoverable` |
 | ------------------------------------- | ----------------------- | ------------- |
 | `library_id` not found in registry    | `LIBRARY_NOT_FOUND`     | `false`       |
+| HTTP 404 fetching llms.txt            | `LLMS_TXT_NOT_FOUND`    | `false`       |
 | Network error fetching llms.txt       | `LLMS_TXT_FETCH_FAILED` | `true`        |
-| HTTP non-200 fetching llms.txt        | `LLMS_TXT_FETCH_FAILED` | `true`        |
+| HTTP 5xx / timeout fetching llms.txt  | `LLMS_TXT_FETCH_FAILED` | `true`        |
 | `library_id` fails pattern validation | `INVALID_INPUT`         | `false`       |
 
 **`LIBRARY_NOT_FOUND` example**:
@@ -821,7 +822,8 @@ This envelope is returned inside the MCP `result` content with `isError: true` â
 | Code                    | Raised by          | Description                                                                                    | `recoverable` |
 | ----------------------- | ------------------ | ---------------------------------------------------------------------------------------------- | ------------- |
 | `LIBRARY_NOT_FOUND`     | `get_library_docs` | `library_id` is valid syntax but not present in the registry                                   | `false`       |
-| `LLMS_TXT_FETCH_FAILED` | `get_library_docs` | Network error, timeout, or non-200 HTTP response when fetching the llms.txt URL                | `true`        |
+| `LLMS_TXT_NOT_FOUND`    | `get_library_docs` | HTTP 404 fetching the llms.txt URL â€” the URL in the registry is incorrect                      | `false`       |
+| `LLMS_TXT_FETCH_FAILED` | `get_library_docs` | Network error, timeout, or server error fetching the llms.txt URL                              | `true`        |
 | `PAGE_NOT_FOUND`        | `read_page`        | HTTP 404 for the requested URL                                                                 | `false`       |
 | `PAGE_FETCH_FAILED`     | `read_page`        | Network error, timeout, non-200/404 HTTP response, or too many redirects                       | `true`        |
 | `URL_NOT_ALLOWED`       | `read_page`        | URL domain is not in the SSRF allowlist, or is a private IP range                              | `false`       |

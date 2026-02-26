@@ -131,6 +131,15 @@ class Fetcher:
                     continue
 
                 if not response.is_success:
+                    if response.status_code == 404:
+                        raise ProContextError(
+                            code=ErrorCode.PAGE_NOT_FOUND,
+                            message=f"HTTP 404 fetching {url}",
+                            suggestion=(
+                                "The requested documentation page does not exist at this URL."
+                            ),
+                            recoverable=False,
+                        )
                     raise ProContextError(
                         code=ErrorCode.PAGE_FETCH_FAILED,
                         message=f"HTTP {response.status_code} fetching {url}",

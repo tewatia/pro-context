@@ -157,6 +157,14 @@ class TestGetLibraryDocsHandler:
         }
 
     @respx.mock
+    async def test_llms_404_maps_to_llms_not_found(self, app_state: AppState) -> None:
+        respx.get("https://python.langchain.com/llms.txt").mock(return_value=httpx.Response(404))
+        with pytest.raises(ProContextError) as exc_info:
+            await get_docs_handle("langchain", app_state)
+        assert exc_info.value.code == ErrorCode.LLMS_TXT_NOT_FOUND
+        assert exc_info.value.recoverable is False
+
+    @respx.mock
     async def test_network_failure_raises_fetch_failed(self, app_state: AppState) -> None:
         respx.get("https://python.langchain.com/llms.txt").mock(return_value=httpx.Response(503))
         with pytest.raises(ProContextError) as exc_info:

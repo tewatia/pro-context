@@ -404,7 +404,8 @@ Every error response follows the same structure:
 | Code                    | Tool               | `recoverable` | Description                                                             |
 | ----------------------- | ------------------ | ------------- | ----------------------------------------------------------------------- |
 | `LIBRARY_NOT_FOUND`     | `get_library_docs` | `false`       | `library_id` not in registry; retrying won't help                       |
-| `LLMS_TXT_FETCH_FAILED` | `get_library_docs` | `true`        | Transient network error or non-200 fetching llms.txt; retry may succeed |
+| `LLMS_TXT_NOT_FOUND`    | `get_library_docs` | `false`       | HTTP 404 fetching llms.txt — the URL in the registry is incorrect       |
+| `LLMS_TXT_FETCH_FAILED` | `get_library_docs` | `true`        | Transient network error or server error fetching llms.txt; retry may succeed |
 | `PAGE_NOT_FOUND`        | `read_page`        | `false`       | HTTP 404 — the page does not exist at that URL                          |
 | `PAGE_FETCH_FAILED`     | `read_page`        | `true`        | Transient network error fetching page; retry may succeed                |
 | `URL_NOT_ALLOWED`       | `read_page`        | `false`       | URL domain not in SSRF allowlist; only a different URL will succeed     |

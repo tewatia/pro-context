@@ -133,6 +133,7 @@ dependencies = [
     "pydantic-settings>=2.2.0,<3.0.0",      # YAML config + env var overrides
     "pyyaml>=6.0.1,<7.0.0",                 # YAML parser (required by pydantic-settings)
     "rapidfuzz>=3.6.0,<4.0.0",              # Levenshtein fuzzy matching
+    "platformdirs>=4.0.0,<5.0.0",           # Platform-aware config/data directories
     "structlog>=24.1.0,<26.0.0",            # Structured logging
     "uvicorn>=0.34.0,<1.0.0",               # ASGI server for HTTP transport
 ]
@@ -182,7 +183,7 @@ include = ["src"]
 
 **Version floors**: Since this is a new project with no legacy consumers, version floors should track reasonably close to the latest stable release at the time of writing. There is no reason to support old versions that nobody is using yet. Review and bump floors at the start of each implementation phase — stale floors accumulate silently and can mask behavioural differences between the version you test against and the version the floor permits.
 
-**Dependency footprint**: ProContext has 9 runtime dependencies. Each is justified by a capability that would require significantly more code to replicate correctly (async HTTP with SSRF-safe redirect control, async SQLite, fuzzy string matching, structured logging, validated settings). Zero-dependency is a virtue but not at the cost of correctness or maintainability. Before adding any new runtime dependency, verify that the same capability cannot be covered by an existing dependency or the Python standard library.
+**Dependency footprint**: ProContext has 10 runtime dependencies. Each is justified by a capability that would require significantly more code to replicate correctly (async HTTP with SSRF-safe redirect control, async SQLite, fuzzy string matching, structured logging, validated settings). Zero-dependency is a virtue but not at the cost of correctness or maintainability. Before adding any new runtime dependency, verify that the same capability cannot be covered by an existing dependency or the Python standard library.
 
 **License compatibility**: All runtime dependencies are compatible with GPL-3.0. Verified at last review (2026-02-24):
 
@@ -195,6 +196,7 @@ include = ["src"]
 | `pydantic-settings` | MIT               |                                                  |
 | `pyyaml`            | MIT               |                                                  |
 | `rapidfuzz`         | MIT               |                                                  |
+| `platformdirs`      | MIT               | Platform-aware config/data directories           |
 | `structlog`         | MIT OR Apache-2.0 | Dual-licensed; either is compatible with GPL-3.0 |
 | `uvicorn`           | BSD-3-Clause      |                                                  |
 

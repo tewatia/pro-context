@@ -89,7 +89,14 @@ async def handle(library_id: str, state: AppState) -> dict:
     try:
         content = await state.fetcher.fetch(entry.llms_txt_url, state.allowlist)
     except ProContextError as exc:
-        # Translate generic fetch error to llms.txt-specific error code
+        # Translate generic page-level fetch errors to llms.txt-specific error codes
+        if exc.code == ErrorCode.PAGE_NOT_FOUND:
+            raise ProContextError(
+                code=ErrorCode.LLMS_TXT_NOT_FOUND,
+                message=exc.message,
+                suggestion="The llms.txt URL in the registry may be incorrect.",
+                recoverable=False,
+            ) from exc
         if exc.code == ErrorCode.PAGE_FETCH_FAILED:
             raise ProContextError(
                 code=ErrorCode.LLMS_TXT_FETCH_FAILED,

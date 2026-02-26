@@ -27,7 +27,7 @@ import procontext.tools.get_library_docs as t_get_docs
 import procontext.tools.resolve_library as t_resolve
 from procontext import __version__
 from procontext.cache import Cache
-from procontext.config import Settings
+from procontext.config import _DEFAULT_DATA_DIR, Settings
 from procontext.errors import ProContextError
 from procontext.fetcher import Fetcher, build_allowlist, build_http_client
 from procontext.registry import (
@@ -83,27 +83,70 @@ def _setup_logging(settings: Settings) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _registry_paths(settings: Settings) -> tuple[Path, Path]:
+def _registry_paths() -> tuple[Path, Path]:
     """Return local registry pair paths for the current runtime."""
-    app_data_dir = Path(settings.cache.db_path).expanduser().parent
-    registry_dir = app_data_dir / "registry"
+    registry_dir = Path(_DEFAULT_DATA_DIR) / "registry"
     return (
         registry_dir / "known-libraries.json",
         registry_dir / "registry-state.json",
     )
 
 
+FIRST_RUN_FETCH_TIMEOUT_SECONDS = 5.0
+
+
 def _jittered_delay(base_seconds: int) -> float:
     return base_seconds * random.uniform(0.8, 1.2)
 
 
-async def _run_registry_update_scheduler(state: AppState) -> None:
+def _log_bundled_registry_warning() -> None:
+    log.warning(
+        "registry_using_bundled_snapshot",
+        message=(
+            "Using bundled registry snapshot. Library data may be outdated. "
+            "Suggested next steps: "
+            "(1) Check your internet connection. "
+            "(2) Try restarting the server later. "
+            "(3) If the issue persists, download the registry manually from "
+            "the registry URL and place it in the data directory."
+        ),
+    )
+
+
+async def _maybe_blocking_first_run_fetch(state: AppState) -> bool:
+    """Attempt a one-shot blocking registry fetch on first run.
+
+    Returns True if the fetch succeeded and state was updated.
+    """
+    try:
+        outcome = await asyncio.wait_for(
+            check_for_registry_update(state),
+            timeout=FIRST_RUN_FETCH_TIMEOUT_SECONDS,
+        )
+        if outcome == "success":
+            log.info("first_run_fetch_success", version=state.registry_version)
+            return True
+    except TimeoutError:
+        log.warning("first_run_fetch_timeout", timeout=FIRST_RUN_FETCH_TIMEOUT_SECONDS)
+    except Exception:
+        log.warning("first_run_fetch_error", exc_info=True)
+
+    _log_bundled_registry_warning()
+    return False
+
+
+async def _run_registry_update_scheduler(
+    state: AppState,
+    *,
+    skip_initial_check: bool = False,
+) -> None:
     """Run startup update check and (HTTP mode) periodic registry update checks."""
     if state.settings.server.transport != "http":
-        try:
-            await check_for_registry_update(state)
-        except Exception:
-            log.warning("registry_update_scheduler_error", mode="startup_once", exc_info=True)
+        if not skip_initial_check:
+            try:
+                await check_for_registry_update(state)
+            except Exception:
+                log.warning("registry_update_scheduler_error", mode="startup_once", exc_info=True)
         return
 
     backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
@@ -157,7 +200,7 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
         transport=settings.server.transport,
     )
 
-    registry_path, registry_state_path = _registry_paths(settings)
+    registry_path, registry_state_path = _registry_paths()
 
     # Phase 1: Load registry and build indexes
     entries, version = load_registry(
@@ -190,14 +233,22 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
         allowlist=allowlist,
     )
 
-    registry_update_task = asyncio.create_task(_run_registry_update_scheduler(state))
+    # First run (bundled fallback): attempt a blocking fetch before serving
+    first_run_attempted = False
+    if version == "unknown":
+        first_run_attempted = True
+        await _maybe_blocking_first_run_fetch(state)
+
+    registry_update_task = asyncio.create_task(
+        _run_registry_update_scheduler(state, skip_initial_check=first_run_attempted)
+    )
 
     log.info(
         "server_started",
         version=__version__,
         transport=settings.server.transport,
-        registry_entries=len(entries),
-        registry_version=version,
+        registry_entries=len(state.indexes.by_id),
+        registry_version=state.registry_version,
     )
 
     try:
@@ -216,6 +267,9 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
 # ---------------------------------------------------------------------------
 
 mcp = FastMCP("procontext", lifespan=lifespan)
+# FastMCP doesn't expose a version kwarg — set it on the underlying Server
+# so the MCP initialize handshake reports our version, not the SDK's.
+mcp._mcp_server.version = __version__  # pyright: ignore[reportPrivateUsage]
 
 
 def _serialise_tool_error(error: ProContextError) -> CallToolResult:

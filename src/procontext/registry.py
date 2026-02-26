@@ -92,8 +92,8 @@ def _load_local_registry_pair(
         return None
 
     if not local_registry_path.is_file() or not local_state_path.is_file():
-        log.warning(
-            "registry_local_pair_invalid",
+        log.debug(
+            "registry_local_pair_missing",
             reason="missing_files",
             path_registry=str(local_registry_path),
             path_state=str(local_state_path),

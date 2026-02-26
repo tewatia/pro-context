@@ -287,6 +287,7 @@ from pydantic import BaseModel
 
 class ErrorCode(StrEnum):
     LIBRARY_NOT_FOUND     = "LIBRARY_NOT_FOUND"
+    LLMS_TXT_NOT_FOUND    = "LLMS_TXT_NOT_FOUND"
     LLMS_TXT_FETCH_FAILED = "LLMS_TXT_FETCH_FAILED"
     PAGE_NOT_FOUND        = "PAGE_NOT_FOUND"
     PAGE_FETCH_FAILED     = "PAGE_FETCH_FAILED"
@@ -543,7 +544,8 @@ async def fetch(
     url: str,
     allowlist: frozenset[str],
     max_redirects: int = 3,
-) -> httpx.Response:
+) -> str:
+    """Returns response text on success. Raises ProContextError on failure."""
     current_url = url
 
     for hop in range(max_redirects + 1):
@@ -568,7 +570,10 @@ async def fetch(
             current_url = str(response.next_request.url)
             continue
 
-        return response
+        if not response.is_success:
+            # ... raise PAGE_NOT_FOUND (404) or PAGE_FETCH_FAILED (other)
+
+        return response.text
 
     raise ProContextError(  # unreachable but satisfies type checker
         code=ErrorCode.PAGE_FETCH_FAILED,
@@ -577,6 +582,8 @@ async def fetch(
         recoverable=False,
     )
 ```
+
+The return type is `str` (response text), not `httpx.Response`. This keeps `httpx` out of the tool layer — tool handlers and `FetcherProtocol` consumers never touch `httpx` types directly.
 
 ---
 

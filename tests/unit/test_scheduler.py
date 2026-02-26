@@ -54,6 +54,15 @@ class TestSchedulerStdioMode:
 
         mock_check.assert_awaited_once()
 
+    async def test_stdio_skip_initial_check(self) -> None:
+        state = _make_state(transport="stdio")
+        mock_check = AsyncMock(return_value="success")
+
+        with patch("procontext.server.check_for_registry_update", mock_check):
+            await _run_registry_update_scheduler(state, skip_initial_check=True)
+
+        mock_check.assert_not_awaited()
+
 
 class TestSchedulerHttpMode:
     """HTTP mode: loops with outcome-dependent sleep durations."""

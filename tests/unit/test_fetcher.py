@@ -152,8 +152,8 @@ class TestFetcher:
                 fetcher = Fetcher(client)
                 with pytest.raises(ProContextError) as exc_info:
                     await fetcher.fetch("https://example.com/missing", ALLOWLIST)
-                assert exc_info.value.code == ErrorCode.PAGE_FETCH_FAILED
-                assert exc_info.value.recoverable is True
+                assert exc_info.value.code == ErrorCode.PAGE_NOT_FOUND
+                assert exc_info.value.recoverable is False
 
     async def test_500_raises_error(self) -> None:
         with respx.mock:
