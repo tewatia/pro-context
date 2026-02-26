@@ -8,7 +8,7 @@
 
 ProContext is an open-source [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that will deliver accurate, fresh documentation to AI coding agents like Claude Code, Cursor, and Windsurf. It prevents hallucinated APIs by serving real documentation from Python libraries, MCP servers, GitHub projects, and any source that publishes [llms.txt](https://llmstxt.org) files.
 
-> ⚠️ **Project Status**: **Phase 2 complete** (registry, resolution, fetcher & cache implemented). Phase 3 (page reading & parser) is next. Not yet usable — see [Development Status](#development-status) below.
+> ⚠️ **Project Status**: **Phase 3 complete** (registry, resolution, fetcher, cache, page reading & heading parser implemented). Phase 4 (HTTP transport) is next. Not yet usable — see [Development Status](#development-status) below.
 
 ---
 
@@ -136,9 +136,9 @@ ProContext uses a **registry-first, lazy-fetch** architecture:
 
 ## Development Status
 
-**Current Phase**: Phase 3 — Page Reading & Parser
+**Current Phase**: Phase 4 — HTTP Transport
 
-Phases 0 through 2 are complete. The server skeleton, configuration, data models, registry loader, fuzzy resolver, `resolve_library` tool, httpx fetcher with SSRF protection, SQLite cache with stale-while-revalidate, and `get_library_docs` tool are all implemented in `src/procontext/`. Phase 3 will implement the `read_page` tool and the heading parser.
+Phases 0 through 3 are complete. The server skeleton, configuration, data models, registry loader, fuzzy resolver, `resolve_library` tool, httpx fetcher with SSRF protection, SQLite cache with stale-while-revalidate, `get_library_docs` tool, heading parser, and `read_page` tool are all implemented in `src/procontext/`. Phase 4 will implement Streamable HTTP transport with `MCPSecurityMiddleware`.
 
 ### Specification Documents (`docs/specs/`)
 
@@ -155,7 +155,7 @@ All design decisions are captured here before implementation begins.
 - ✅ **Phase 0**: Foundation — server skeleton, config, logging, errors, models, protocols, `AppState`
 - ✅ **Phase 1**: Registry & Resolution — `load_registry()`, `resolve_library` tool, fuzzy matching
 - ✅ **Phase 2**: Fetcher & Cache — `get_library_docs` tool, httpx fetcher with SSRF protection, SQLite cache with stale-while-revalidate
-- ⬜ **Phase 3**: Page Reading & Parser — `read_page` tool, heading parser, section extraction
+- ✅ **Phase 3**: Page Reading & Parser — `read_page` tool, heading parser, section extraction
 - ⬜ **Phase 4**: HTTP Transport — Streamable HTTP, `MCPSecurityMiddleware`, uvicorn
 - ⬜ **Phase 5**: Registry Updates & Polish — background updates, cache cleanup, CI/CD, Docker, `uvx` packaging
 

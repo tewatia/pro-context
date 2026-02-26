@@ -28,11 +28,11 @@ Ankur has recently been working with Generative AI-based applications. Since thi
 - ✅ **Phase 0**: Foundation — `pyproject.toml`, errors, models package, protocols, config, `AppState`, server skeleton, `RegistryIndexes` stub, `tools/` package
 - ✅ **Phase 1**: Registry & Resolution — `load_registry()`, `build_indexes()`, `resolve_library` tool, fuzzy matching (rapidfuzz)
 - ✅ **Phase 2**: Fetcher & Cache — `get_library_docs` tool, httpx fetcher with SSRF protection, SQLite cache (aiosqlite), stale-while-revalidate
-- ⬜ **Phase 3**: Page Reading & Parser — `read_page` tool, heading parser, section extraction
+- ✅ **Phase 3**: Page Reading & Parser — `read_page` tool, heading parser, section extraction
 - ⬜ **Phase 4**: HTTP Transport — Streamable HTTP (MCP spec 2025-11-25), `MCPSecurityMiddleware`, uvicorn
 - ⬜ **Phase 5**: Registry Updates & Polish — background update check, cache cleanup scheduler, CI/CD, Docker, `uvx` packaging
 
-**Current state**: Phase 2 is complete. Source code lives in `src/procontext/`. Phase 3 implementation is next.
+**Current state**: Phase 3 is complete. Source code lives in `src/procontext/`. Phase 4 implementation is next.
 
 ### Active Specifications (`docs/specs/`)
 

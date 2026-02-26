@@ -24,6 +24,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
 
 import procontext.tools.get_library_docs as t_get_docs
+import procontext.tools.read_page as t_read_page
 import procontext.tools.resolve_library as t_resolve
 from procontext import __version__
 from procontext.cache import Cache
@@ -314,7 +315,26 @@ async def get_library_docs(library_id: str, ctx: Context) -> object:
         return _serialise_tool_error(exc)
 
 
-# Phase 3 — read_page
+@mcp.tool()
+async def read_page(url: str, ctx: Context, offset: int = 1, limit: int = 2000) -> object:
+    """Fetch the content of a documentation page.
+
+    Returns a plain-text heading map (line numbers + heading text) for the full
+    page, and a content window controlled by offset and limit. Use headings to
+    find sections, then call again with offset to jump directly to them.
+    """
+    state: AppState = ctx.request_context.lifespan_context
+    try:
+        return await t_read_page.handle(url, offset, limit, state)
+    except ProContextError as exc:
+        log.warning(
+            "tool_error",
+            tool="read_page",
+            code=exc.code,
+            message=exc.message,
+            recoverable=exc.recoverable,
+        )
+        return _serialise_tool_error(exc)
 
 
 # ---------------------------------------------------------------------------
