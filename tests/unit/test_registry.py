@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from procontext.config import Settings
 from procontext.fetcher import build_allowlist
 from procontext.registry import (
+    _fsync_directory,
     check_for_registry_update,
     load_registry,
     save_registry_to_disk,
@@ -250,3 +252,39 @@ async def test_check_for_registry_update_semantic_on_checksum_mismatch(
 
     assert outcome == "semantic_failure"
     assert state.registry_version == "2026-02-20"
+
+
+class TestFsyncDirectoryWindowsGuard:
+    """Verify _fsync_directory is a no-op on Windows."""
+
+    def test_noop_on_win32(self, tmp_path: Path) -> None:
+        with patch("procontext.registry.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            # Should return without calling os.open or os.fsync
+            _fsync_directory(tmp_path)
+
+    def test_executes_on_non_windows(self, tmp_path: Path) -> None:
+        with patch("procontext.registry.sys") as mock_sys:
+            mock_sys.platform = "linux"
+            # On a real filesystem (macOS/Linux CI), this should succeed
+            _fsync_directory(tmp_path)
+
+    def test_save_registry_to_disk_succeeds_on_win32(self, tmp_path: Path) -> None:
+        payload = [{"id": "test", "name": "Test", "llms_txt_url": "https://example.com/llms.txt"}]
+        registry_bytes = json.dumps(payload).encode("utf-8")
+        checksum = _sha256_prefixed(registry_bytes)
+
+        registry_path = tmp_path / "registry" / "known-libraries.json"
+        state_path = tmp_path / "registry" / "registry-state.json"
+
+        with patch("procontext.registry.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            save_registry_to_disk(
+                registry_bytes=registry_bytes,
+                version="2026-02-26",
+                checksum=checksum,
+                registry_path=registry_path,
+                state_path=state_path,
+            )
+
+        assert registry_path.read_bytes() == registry_bytes

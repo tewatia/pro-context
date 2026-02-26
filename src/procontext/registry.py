@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -359,6 +360,8 @@ def _write_bytes_fsync(path: Path, data: bytes) -> None:
 
 
 def _fsync_directory(path: Path) -> None:
+    if sys.platform == "win32":
+        return  # Windows does not support fsync on directory handles
     directory_fd = os.open(path, os.O_RDONLY)
     try:
         os.fsync(directory_fd)

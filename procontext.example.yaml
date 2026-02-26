@@ -21,7 +21,11 @@ registry:
 
 cache:
   ttl_hours: 24
-  db_path: "~/.local/share/procontext/cache.db"
+  # db_path default is platform-specific (via platformdirs):
+  #   Linux:   ~/.local/share/procontext/cache.db
+  #   macOS:   ~/Library/Application Support/procontext/cache.db
+  #   Windows: C:\Users\<user>\AppData\Local\procontext\cache.db
+  # db_path: "/custom/path/to/cache.db"
   cleanup_interval_hours: 6
 
 logging:

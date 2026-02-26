@@ -420,7 +420,7 @@ echo '{}' | uv run procontext  # Responds without crash
 
 **Goal**: `resolve_library` tool is fully functional. Registry loads from the bundled snapshot in this phase. Fuzzy matching works.
 
-**Phase boundary note**: End-state registry behavior is local-first (`~/.local/share/procontext/registry/known-libraries.json`) with background update checks. That behavior is implemented in **Phase 5** (`check_for_registry_update()`, `save_registry_to_disk()`, background tasks), not Phase 1.
+**Phase boundary note**: End-state registry behavior is local-first (`<data_dir>/registry/known-libraries.json`, where `<data_dir>` is resolved by `platformdirs.user_data_dir("procontext")`) with background update checks. That behavior is implemented in **Phase 5** (`check_for_registry_update()`, `save_registry_to_disk()`, background tasks), not Phase 1.
 
 **Files to create/update**:
 
@@ -564,7 +564,7 @@ echo '{}' | uv run procontext  # Responds without crash
 - Simulated interrupted write leaves startup in a safe state (either previous valid pair or bundled fallback)
 - HTTP mode scheduler: successful checks run every 24 hours
 - HTTP mode scheduler: transient failures use exponential backoff + jitter (1 minute to 60 minutes cap)
-- HTTP mode scheduler: fast retries are suspended after 8 consecutive transient failures and cadence returns to 24 hours until next success
+- HTTP mode scheduler: after 8 consecutive transient failures, counter and backoff reset, cadence returns to 24 hours; next round gets a fresh set of fast-retry attempts
 - HTTP mode scheduler: semantic failures (checksum/metadata/schema) do not fast-retry and return to 24-hour cadence
 - `uvx procontext` installs and runs from PyPI (manual verification)
 - `CHANGELOG.md` is present and follows Keep a Changelog format

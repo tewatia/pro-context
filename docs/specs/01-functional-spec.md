@@ -222,6 +222,8 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 
 ProContext supports two transport modes. The same MCP tools are available in both modes.
 
+> **`<data_dir>`** refers to the platform-specific data directory resolved by `platformdirs.user_data_dir("procontext")`: `~/.local/share/procontext` on Linux, `~/Library/Application Support/procontext` on macOS, `C:\Users\<user>\AppData\Local\procontext` on Windows.
+
 ### 5.1 stdio Transport
 
 The default mode for local development. The MCP client (e.g., Claude Code, Cursor) spawns ProContext as a subprocess and communicates over stdin/stdout using the MCP JSON-RPC protocol.
@@ -230,8 +232,8 @@ The default mode for local development. The MCP client (e.g., Claude Code, Curso
 
 - No network exposure — entirely local
 - Process lifecycle managed by the MCP client
-- Registry loaded from local disk when a valid local registry pair exists (`~/.local/share/procontext/registry/known-libraries.json` + `registry-state.json`), otherwise bundled snapshot fallback
-- SQLite database at `~/.local/share/procontext/cache.db`
+- Registry loaded from local disk when a valid local registry pair exists (`<data_dir>/registry/known-libraries.json` + `registry-state.json`), otherwise bundled snapshot fallback
+- SQLite database at `<data_dir>/cache.db`
 - No authentication required
 
 **Configuration** (in MCP client settings):
@@ -284,7 +286,7 @@ The library registry (`known-libraries.json`) is the data backbone of ProContext
 
 **At server startup**:
 
-1. Attempt to load local registry pair from `~/.local/share/procontext/registry/known-libraries.json` and `~/.local/share/procontext/registry/registry-state.json`
+1. Attempt to load local registry pair from `<data_dir>/registry/known-libraries.json` and `<data_dir>/registry/registry-state.json`
 2. Validate the pair (`known-libraries.json` parses, `registry-state.json` parses, checksum matches)
 3. If either file is missing or the pair is invalid: ignore local pair and fall back to bundled snapshot (shipped with the package)
 4. In the background: check the configured registry URL for a newer version and download if available. The updated registry is used on the next server start (stdio) or atomically swapped in-memory in HTTP long-running mode (registry indexes + SSRF allowlist updated together).
@@ -301,7 +303,7 @@ The library registry (`known-libraries.json`) is the data backbone of ProContext
 - Both transports perform one registry update check at startup
 - In HTTP long-running mode, successful checks follow a steady 24-hour cadence
 - In HTTP long-running mode, **transient** failures (network timeout/DNS/connection issues, upstream 5xx) retry with exponential backoff (starting at 1 minute, capped at 60 minutes, with jitter)
-- In HTTP long-running mode, after `8` consecutive transient failures, fast retries are suspended and checks return to 24-hour cadence until the next successful check
+- In HTTP long-running mode, after `8` consecutive transient failures, the failure counter and backoff reset, and checks return to 24-hour cadence. The next round gets a fresh set of fast-retry attempts.
 - In HTTP long-running mode, **semantic** failures (invalid metadata shape, checksum mismatch, registry schema parse errors) do not fast-retry; they log and return to the normal 24-hour cadence
 - In stdio mode, no post-startup retries are scheduled because the process is short-lived
 

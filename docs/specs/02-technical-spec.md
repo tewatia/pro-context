@@ -584,7 +584,7 @@ async def fetch(
 
 ### 6.1 SQLite Schema
 
-Single database at `~/.local/share/procontext/cache.db`. WAL mode is set once at connection time and persists — it does not need to be re-applied on subsequent opens.
+Single database at `<data_dir>/cache.db` (where `<data_dir>` is the platform-specific data directory resolved by `platformdirs.user_data_dir("procontext")`). WAL mode is set once at connection time and persists — it does not need to be re-applied on subsequent opens.
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -875,8 +875,8 @@ def run_http_server(config: ServerConfig) -> None:
 ### Startup
 
 ```
-1. Attempt to load ~/.local/share/procontext/registry/known-libraries.json
-2. Attempt to load ~/.local/share/procontext/registry/registry-state.json
+1. Attempt to load <data_dir>/registry/known-libraries.json
+2. Attempt to load <data_dir>/registry/registry-state.json
 3. Validate local pair: both files parse and sha256(known-libraries.json) equals registry-state.json.checksum
 4. If either file is missing or validation fails → ignore local pair, load bundled snapshot (src/procontext/data/known-libraries.json), set local version to "unknown"
 5. Build in-memory indexes and SSRF allowlist from loaded data
@@ -885,7 +885,7 @@ def run_http_server(config: ServerConfig) -> None:
 
 ### Local Registry State File
 
-`registry-state.json` is stored alongside `known-libraries.json` at `~/.local/share/procontext/registry/`:
+`registry-state.json` is stored alongside `known-libraries.json` at `<data_dir>/registry/`:
 
 ```json
 {
@@ -906,27 +906,38 @@ Rules:
 `save_registry_to_disk()` writes both files with crash-safe semantics:
 
 ```python
-def save_registry_to_disk(registry_bytes: bytes, version: str, checksum: str, dir_path: Path) -> None:
+def save_registry_to_disk(
+    *,
+    registry_bytes: bytes,
+    version: str,
+    checksum: str,
+    registry_path: Path,
+    state_path: Path,
+) -> None:
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+
     state_bytes = json.dumps(
         {
             "version": version,
             "checksum": checksum,
-            "updated_at": utc_now_iso8601(),
+            "updated_at": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
         }
     ).encode("utf-8")
 
-    registry_tmp = dir_path / "known-libraries.json.tmp"
-    state_tmp = dir_path / "registry-state.json.tmp"
-    registry_dst = dir_path / "known-libraries.json"
-    state_dst = dir_path / "registry-state.json"
+    registry_tmp = registry_path.with_suffix(registry_path.suffix + ".tmp")
+    state_tmp = state_path.with_suffix(state_path.suffix + ".tmp")
 
-    write_bytes_and_fsync(registry_tmp, registry_bytes)
-    write_bytes_and_fsync(state_tmp, state_bytes)
+    try:
+        _write_bytes_fsync(registry_tmp, registry_bytes)
+        _write_bytes_fsync(state_tmp, state_bytes)
 
-    # Atomic replace on same filesystem
-    os.replace(registry_tmp, registry_dst)
-    os.replace(state_tmp, state_dst)
-    fsync_directory(dir_path)
+        os.replace(registry_tmp, registry_path)
+        os.replace(state_tmp, state_path)
+        _fsync_directory(registry_path.parent)
+    finally:
+        for tmp in (registry_tmp, state_tmp):
+            with suppress(OSError):
+                tmp.unlink(missing_ok=True)
 ```
 
 Operational guarantees:
@@ -938,57 +949,57 @@ Operational guarantees:
 ### Background Update Check
 
 ```python
-REGISTRY_METADATA_URL = "https://procontext.github.io/registry_metadata.json"
+RegistryUpdateOutcome = Literal["success", "transient_failure", "semantic_failure"]
 
-async def _check_for_registry_update(state: AppState) -> None:
-    try:
-        response = await state.http_client.get(REGISTRY_METADATA_URL, timeout=10.0)
-        response.raise_for_status()
-        metadata = response.json()
+async def check_for_registry_update(state: AppState) -> RegistryUpdateOutcome:
+    # 1. Fetch metadata (transient on network error or 5xx/408/429)
+    metadata_response = await _safe_get(state, state.settings.registry.metadata_url, timeout=10.0)
+    if metadata_response is None:
+        return "transient_failure"
+    if not metadata_response.is_success:
+        return _classify_http_failure(...)
 
-        remote_version = metadata["version"]
-        local_version = state.registry_version
+    # 2. Parse and validate metadata fields (semantic on invalid shape)
+    metadata = metadata_response.json()
+    remote_version, download_url, expected_checksum = ...  # validate or return "semantic_failure"
 
-        if remote_version == local_version:
-            return  # Already up to date
+    # 3. Short-circuit if already up to date
+    if remote_version == state.registry_version:
+        return "success"
 
-        # Download new registry
-        download_url = metadata["download_url"]
-        registry_response = await state.http_client.get(download_url, timeout=60.0)
-        registry_response.raise_for_status()
+    # 4. Download registry (transient on network error or 5xx/408/429)
+    registry_response = await _safe_get(state, download_url, timeout=60.0)
+    if registry_response is None:
+        return "transient_failure"
 
-        # Validate checksum
-        expected_checksum = metadata["checksum"]  # "sha256:abc123..."
-        actual_checksum = "sha256:" + hashlib.sha256(registry_response.content).hexdigest()
-        if actual_checksum != expected_checksum:
-            log.warning("registry_checksum_mismatch", expected=expected_checksum, actual=actual_checksum)
-            return
+    # 5. Checksum validation (semantic on mismatch)
+    actual_checksum = _sha256_prefixed(registry_response.content)
+    if actual_checksum != expected_checksum:
+        return "semantic_failure"
 
-        # Parse and rebuild indexes + allowlist
-        new_entries = [RegistryEntry(**e) for e in registry_response.json()]
-        new_indexes = build_indexes(new_entries)
-        new_allowlist = build_allowlist(new_entries)
+    # 6. Parse registry entries (semantic on schema error)
+    new_entries = [RegistryEntry(**e) for e in registry_response.json()]
 
-        # Atomic in-memory swap as one assignment to avoid mixed old/new state
-        state.indexes, state.allowlist, state.registry_version = (
-            new_indexes,
-            new_allowlist,
-            remote_version,
-        )
+    # 7. Rebuild indexes + allowlist and swap atomically
+    new_indexes = build_indexes(new_entries)
+    new_allowlist = build_allowlist(new_entries)
+    state.indexes, state.allowlist, state.registry_version = (
+        new_indexes, new_allowlist, remote_version,
+    )
 
-        # Persist to local disk for next startup (registry + sidecar metadata)
-        _save_registry_to_disk(
-            registry_bytes=registry_response.content,
-            version=remote_version,
-            checksum=expected_checksum,
-        )
+    # 8. Persist to disk (non-fatal on failure)
+    save_registry_to_disk(
+        registry_bytes=registry_response.content,
+        version=remote_version,
+        checksum=expected_checksum,
+        registry_path=state.registry_path,
+        state_path=state.registry_state_path,
+    )
 
-        log.info("registry_updated", version=remote_version, entries=len(new_entries))
-
-    except Exception:
-        log.warning("registry_update_failed", exc_info=True)
-        # Non-fatal: server continues with current registry
+    return "success"
 ```
+
+The scheduler (in `server.py`) calls `check_for_registry_update()` and uses the returned outcome to decide the next sleep interval. See Scheduling Policy below.
 
 ### Scheduling Policy (Hybrid)
 
@@ -1002,7 +1013,7 @@ Registry update checks use a hybrid scheduler:
   - `MAX_TRANSIENT_BACKOFF_ATTEMPTS = 8` (consecutive transient failures)
   - `next_backoff = min(current_backoff * 2, MAX_BACKOFF)`
   - jitter: random multiplier in `[0.8, 1.2]`
-- If consecutive transient failures reach `MAX_TRANSIENT_BACKOFF_ATTEMPTS`, suspend fast retries and return to `SUCCESS_INTERVAL = 24h` cadence until the next successful check
+- If consecutive transient failures reach `MAX_TRANSIENT_BACKOFF_ATTEMPTS`, reset the failure counter and backoff, then return to `SUCCESS_INTERVAL = 24h` cadence. This gives the next round a fresh set of fast-retry attempts.
 - In HTTP mode, after a **semantic failure** (invalid metadata fields, checksum mismatch, registry schema parse failure), do not use backoff; log and return to `SUCCESS_INTERVAL = 24h`
 - After a successful check, reset backoff state and return to 24h cadence
 - In stdio mode, no post-startup retries are scheduled because the process is typically short-lived
@@ -1026,6 +1037,7 @@ while running_http_server:
     elif outcome == "transient_failure":
         consecutive_transient_failures += 1
         if consecutive_transient_failures >= max_transient_backoff_attempts:
+            consecutive_transient_failures = 0
             backoff = initial_backoff
             await sleep(success_interval)
             continue
@@ -1042,7 +1054,7 @@ while running_http_server:
 
 ## 10. Configuration
 
-Configuration is loaded from `procontext.yaml` (searched in current directory, then `~/.config/procontext/procontext.yaml`). All values have defaults — the config file is optional.
+Configuration is loaded from `procontext.yaml` (searched in current directory, then the platform config directory via `platformdirs.user_config_dir("procontext")`). All values have defaults — the config file is optional.
 
 ```yaml
 server:
@@ -1058,7 +1070,7 @@ registry:
 
 cache:
   ttl_hours: 24
-  db_path: "~/.local/share/procontext/cache.db"
+  # db_path: platform-specific default via platformdirs.user_data_dir("procontext")
   cleanup_interval_hours: 6
 
 logging:
@@ -1092,7 +1104,7 @@ class RegistrySettings(BaseModel):
 
 class CacheSettings(BaseModel):
     ttl_hours: int = 24
-    db_path: str = "~/.local/share/procontext/cache.db"
+    db_path: str = _DEFAULT_DB_PATH  # platformdirs.user_data_dir("procontext") / "cache.db"
     cleanup_interval_hours: int = 6
 
 class LoggingSettings(BaseModel):
@@ -1129,7 +1141,7 @@ class Settings(BaseSettings):
         )
 ```
 
-`_find_config_file()` searches `procontext.yaml` in the current directory first, then `~/.config/procontext/procontext.yaml`, returning the first path that exists or `None` (config file is optional). Environment variables use the prefix `PROCONTEXT__` with `__` as the nested delimiter (e.g., `PROCONTEXT__SERVER__PORT=9090`, `PROCONTEXT__SERVER__AUTH_ENABLED=true`, `PROCONTEXT__CACHE__TTL_HOURS=48`).
+`_find_config_file()` searches `procontext.yaml` in the current directory first, then the platform config directory (`platformdirs.user_config_dir("procontext")`), returning the first path that exists or `None` (config file is optional). Environment variables use the prefix `PROCONTEXT__` with `__` as the nested delimiter (e.g., `PROCONTEXT__SERVER__PORT=9090`, `PROCONTEXT__SERVER__AUTH_ENABLED=true`, `PROCONTEXT__CACHE__TTL_HOURS=48`).
 
 ---
 

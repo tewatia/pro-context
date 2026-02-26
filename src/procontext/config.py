@@ -2,7 +2,7 @@
 
 Settings are loaded in priority order (highest first):
   1. Environment variables  (PROCONTEXT__SERVER__TRANSPORT=http)
-  2. procontext.yaml        (searched in cwd, then ~/.config/procontext/)
+  2. procontext.yaml        (searched in cwd, then platform config dir)
   3. Hardcoded defaults
 
 The config file is optional — all fields have sensible defaults.
@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
+import platformdirs
 from pydantic import BaseModel
 from pydantic_settings import (
     BaseSettings,
@@ -21,12 +22,15 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
+_DEFAULT_DATA_DIR = platformdirs.user_data_dir("procontext")
+_DEFAULT_DB_PATH = str(Path(_DEFAULT_DATA_DIR) / "cache.db")
+
 
 def _find_config_file() -> str | None:
     """Return the path of the first procontext.yaml found, or None."""
     candidates = [
         Path("procontext.yaml"),
-        Path.home() / ".config" / "procontext" / "procontext.yaml",
+        Path(platformdirs.user_config_dir("procontext")) / "procontext.yaml",
     ]
     for path in candidates:
         if path.exists():
@@ -47,7 +51,7 @@ class RegistrySettings(BaseModel):
 
 class CacheSettings(BaseModel):
     ttl_hours: int = 24
-    db_path: str = "~/.local/share/procontext/cache.db"
+    db_path: str = _DEFAULT_DB_PATH
     cleanup_interval_hours: int = 6
 
 

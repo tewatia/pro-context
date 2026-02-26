@@ -183,7 +183,7 @@ Severity uses a simple scale: **Critical** (system compromise), **High** (securi
 
 **Controls**: None beyond operating system filesystem permissions. Cache is plaintext SQLite with WAL mode. No encryption, no integrity checking of cached content.
 
-**Rationale**: An attacker who can write to `~/.local/share/procontext/cache.db` already has write access to the user's source code, shell configuration, and SSH keys. Encrypting the cache provides no meaningful additional protection in this threat model. This is the correct trade-off for a local-first tool.
+**Rationale**: An attacker who can write to the ProContext data directory (platform-specific, resolved by `platformdirs`) already has write access to the user's source code, shell configuration, and SSH keys. Encrypting the cache provides no meaningful additional protection in this threat model. This is the correct trade-off for a local-first tool.
 
 ---
 
@@ -261,14 +261,16 @@ The SQLite cache stores documentation content without encryption. Local filesyst
 
 ## 6. Data Handling
 
+> **`<data_dir>`** = `platformdirs.user_data_dir("procontext")`: `~/.local/share/procontext` on Linux, `~/Library/Application Support/procontext` on macOS, `C:\Users\<user>\AppData\Local\procontext` on Windows.
+
 ### What is stored
 
 | Location                                                  | Content                                 | Purpose                                    |
 | --------------------------------------------------------- | --------------------------------------- | ------------------------------------------ |
-| `~/.local/share/procontext/cache.db`                      | `toc_cache` table: raw llms.txt content | Avoid re-fetching table of contents        |
-| `~/.local/share/procontext/cache.db`                      | `page_cache` table: full page markdown  | Avoid re-fetching documentation pages      |
-| `~/.local/share/procontext/registry/known-libraries.json` | Library registry                        | Local copy of the registry for offline use |
-| `~/.local/share/procontext/registry/registry-state.json`  | Registry metadata (`version`, `checksum`, `updated_at`) | Local version/checksum source for update checks |
+| `<data_dir>/cache.db`                      | `toc_cache` table: raw llms.txt content | Avoid re-fetching table of contents        |
+| `<data_dir>/cache.db`                      | `page_cache` table: full page markdown  | Avoid re-fetching documentation pages      |
+| `<data_dir>/registry/known-libraries.json` | Library registry                        | Local copy of the registry for offline use |
+| `<data_dir>/registry/registry-state.json`  | Registry metadata (`version`, `checksum`, `updated_at`) | Local version/checksum source for update checks |
 
 ### What is NOT stored
 
@@ -285,7 +287,7 @@ The SQLite cache stores documentation content without encryption. Local filesyst
 
 ### Deletion
 
-Delete `~/.local/share/procontext/` to remove all persistent data (cache + registry). No other filesystem locations are written to.
+Delete the ProContext data directory to remove all persistent data (cache + registry). The data directory is platform-specific (`<data_dir>` = `platformdirs.user_data_dir("procontext")`): `~/.local/share/procontext` on Linux, `~/Library/Application Support/procontext` on macOS, `C:\Users\<user>\AppData\Local\procontext` on Windows. No other filesystem locations are written to.
 
 ### PII
 
