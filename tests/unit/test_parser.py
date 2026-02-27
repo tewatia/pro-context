@@ -141,18 +141,22 @@ class TestEdgeCases:
         content = "```\n# heading\n## heading\n```"
         assert parse_headings(content) == ""
 
-    def test_large_document(self) -> None:
-        # 10,000 lines with headings every 100 lines
+    def test_large_document_over_1mb(self) -> None:
+        # >1MB document with headings every 100 lines
+        num_lines = 9_000
+        body_line = "Line " + ("x" * 120)
         lines = []
-        for i in range(10_000):
+        for i in range(num_lines):
             if i % 100 == 0:
                 lines.append(f"## Section {i // 100}")
             else:
-                lines.append(f"Line {i}")
+                lines.append(body_line)
         content = "\n".join(lines)
+        assert len(content.encode("utf-8")) > 1_048_576
+
         result = parse_headings(content)
         result_lines = result.split("\n")
-        assert len(result_lines) == 100  # 10,000 / 100
+        assert len(result_lines) == num_lines // 100
 
     def test_deeply_nested_unclosed_fences(self) -> None:
         # 100+ unclosed fence opens — parser should not crash

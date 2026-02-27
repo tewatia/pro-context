@@ -4,9 +4,9 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![MCP](https://img.shields.io/badge/MCP-1.0-green.svg)](https://modelcontextprotocol.io)
+[![MCP](https://img.shields.io/badge/MCP-2025--11--25-green.svg)](https://modelcontextprotocol.io)
 
-ProContext is an open-source [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that will deliver accurate, fresh documentation to AI coding agents like Claude Code, Cursor, and Windsurf. It prevents hallucinated APIs by serving real documentation from Python libraries, MCP servers, GitHub projects, and any source that publishes [llms.txt](https://llmstxt.org) files.
+ProContext is an open-source [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that delivers accurate, fresh documentation to AI coding agents like Claude Code, Cursor, and Windsurf. It prevents hallucinated APIs by serving real documentation from Python libraries, MCP servers, GitHub projects, and any source that publishes [llms.txt](https://llmstxt.org) files.
 
 > ⚠️ **Project Status**: **Phase 3 complete** (registry, resolution, fetcher, cache, page reading & heading parser implemented). Phase 4 (HTTP transport) is next. Not yet usable — see [Development Status](#development-status) below.
 
@@ -44,31 +44,34 @@ Existing documentation tools fall into two categories, each with limitations:
 
 ---
 
-## Planned Features
+## Features
+
+### ✅ Implemented (Phases 0–3)
 
 ### 🎯 **Curated Registry**
 
-- Pre-validated documentation sources for 1000+ projects
-- Python libraries (PyPI), MCP servers, GitHub projects, standalone tools
-- Weekly automated updates to discover new documentation
+- Pre-validated documentation sources for Python libraries, MCP servers, GitHub projects, and standalone tools
+- <10ms library lookup from an in-memory index built at startup
+- Fuzzy matching — finds the right library even with typos or pip-style specifiers (`langchain>=0.1`)
 
 ### 📄 **llms.txt Support**
 
 - Native support for the [llms.txt standard](https://llmstxt.org) (AI-optimized documentation)
-- Automatic discovery across documentation platforms (Mintlify, VitePress, custom)
-- Fallback to GitHub README for projects without llms.txt
+- Fetches and parses TOC from llms.txt on demand
+- Serves individual documentation pages via `read_page` with line-range windowing and heading extraction
 
 ### ⚡ **Fast & Efficient**
 
 - **First query**: 2-5 seconds (fetch + parse + cache)
-- **Subsequent queries**: <100ms (served from cache)
+- **Subsequent queries**: <100ms (served from SQLite cache)
+- Stale-while-revalidate — returns cached content immediately, refreshes in the background
 - Incremental loading: only fetches documentation that is actually used
 
 ### 🔍 **Agent-Driven Navigation**
 
 - The agent reads the table of contents (`get_library_docs`) and navigates to specific pages (`read_page`)
 - No server-side keyword search or query interpretation — the agent's LLM already knows what it's looking for
-- Gives agents full control over what they read and in what order
+- Heading extraction lets the agent jump directly to relevant sections
 
 ### 🔄 **Always Fresh**
 
@@ -76,17 +79,32 @@ Existing documentation tools fall into two categories, each with limitations:
 - Automatic background refresh when cache expires (24hr TTL)
 - Serves latest documentation regardless of package version
 
-### 🔧 **Flexible Configuration**
+### 🛡️ **SSRF Protection**
 
-- Add custom documentation sources instantly via config
-- No code changes needed for private/internal docs
-- stdio (local) or HTTP (remote) transport
+- Domain allowlist derived from the registry — the server only fetches from known, pre-validated hosts
+- Private IP ranges blocked at the redirect level — attackers cannot redirect fetches to internal services
+
+---
+
+### 🚧 Coming Soon (Phases 4–5)
+
+### 🔧 **HTTP Transport**
+
+- Streamable HTTP transport (MCP spec 2025-11-25) for remote deployment
+- `MCPSecurityMiddleware` with authentication and rate limiting
+- Docker image and `uvx procontext` one-liner install
+
+### 🔁 **Automatic Registry Updates**
+
+- Background registry update check (every 24 hours in HTTP mode)
+- Weekly automated registry builds to discover new documentation sources
+- 1000+ pre-validated projects at launch
 
 ---
 
 ## Supported Documentation Sources
 
-ProContext will support documentation from:
+ProContext supports documentation from:
 
 | Type                 | Examples                         | How It Works                                           |
 | -------------------- | -------------------------------- | ------------------------------------------------------ |
@@ -161,11 +179,52 @@ All design decisions are captured here before implementation begins.
 
 ---
 
+## Platform Support
+
+ProContext runs on **Windows, macOS, and Linux**. All filesystem paths (config, cache, data) resolve to the correct platform-native locations automatically — no manual path configuration needed.
+
+| Platform | Config & data directory                    |
+| -------- | ------------------------------------------ |
+| Linux    | `~/.local/share/procontext`                |
+| macOS    | `~/Library/Application Support/procontext` |
+| Windows  | `%LOCALAPPDATA%\procontext`                |
+
+---
+
 ## Installation
 
-> 🚧 **Coming Soon** — Installation instructions will be added once Phase 2 (`get_library_docs`) is complete and the server can deliver end-to-end documentation responses.
+> 🚧 **Not yet packaged for end users** — `uvx` / pip install is coming in Phase 5. The server currently runs in **stdio mode only** (HTTP transport is Phase 4).
 
-The server will support both **stdio** (local) and **HTTP** (remote) modes, installable via `uvx` or pip, and configurable for Claude Code, Cursor, Windsurf, and other MCP clients.
+**For development / early testing:**
+
+```bash
+# Clone and install dependencies
+git clone https://github.com/procontexthq/procontext.git
+cd procontext
+uv sync
+
+# Run (stdio — intended to be launched by an MCP client, not directly)
+uv run procontext
+```
+
+**Wire it up in Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "procontext": {
+      "command": "uv",
+      "args": ["run", "--project", "/path/to/procontext", "procontext"]
+    }
+  }
+}
+```
+
+Once published to PyPI (Phase 5), the install will be:
+
+```bash
+uvx procontext
+```
 
 ---
 
