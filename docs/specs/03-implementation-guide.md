@@ -57,7 +57,7 @@ procontext/
 │       │   ├── __init__.py           # Re-exports all public models
 │       │   ├── registry.py           # RegistryEntry, RegistryPackages, LibraryMatch
 │       │   ├── cache.py              # TocCacheEntry, PageCacheEntry
-│       │   └── tools.py              # Heading, all tool I/O models
+│       │   └── tools.py              # All tool I/O models (input validation + output serialisation)
 │       ├── tools/
 │       │   ├── __init__.py
 │       │   ├── resolve_library.py    # Business logic for resolve_library
@@ -67,7 +67,7 @@ procontext/
 │       ├── resolver.py               # 5-step resolution algorithm, fuzzy matching
 │       ├── fetcher.py                # HTTP client, SSRF validation, redirect handling
 │       ├── cache.py                  # SQLite cache: toc_cache + page_cache, stale-while-revalidate
-│       ├── parser.py                 # Heading parser, anchor generation, line number tracking
+│       ├── parser.py                 # Heading parser, code block suppression, line number tracking
 │       ├── transport.py              # MCPSecurityMiddleware for HTTP mode
 │       └── data/
 │           └── known-libraries.json  # Bundled registry snapshot (updated at release time)
@@ -720,8 +720,6 @@ async def app_state(indexes, sample_entries):
 - `#>` comment in code block: not detected
 - H1–H4 outside code blocks: all detected with correct level
 - H5+ ignored
-- Anchor generation: lowercase, slugified, special chars removed
-- Anchor deduplication: `browser-mode`, `browser-mode-2`, `browser-mode-3`
 - Line numbers: each heading records the correct 1-based line number from the source content
 
 `tests/integration/test_tools.py`

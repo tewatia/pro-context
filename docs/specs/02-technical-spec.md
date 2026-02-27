@@ -103,12 +103,12 @@ read_page("https://docs.langchain.com/concepts/streaming.md")
   │
   ├─ SSRF check: domain in allowlist?
   ├─ Cache check: page:{sha256(url)}
-  │    HIT (fresh)  → parse headings from cached content → return
+  │    HIT (fresh)  → return cached content + headings
   │    HIT (stale)  → return + trigger background refresh
   │    MISS         → continue
   ├─ Fetch: HTTP GET url (30s timeout, SSRF validated per redirect)
   ├─ Store: page_cache (TTL 24h)
-  ├─ Parse: extract headings (code-block-aware, H1–H4, line numbers, deduplicated anchors)
+  ├─ Parse: extract headings (code-block-aware, H1–H4, line numbers)
   └─ Return: { headings: [...], content: "..." }
 ```
 
@@ -783,9 +783,9 @@ async def get_library_docs(library_id: str, ctx: Context) -> dict:
     return await t_get_docs.handle(library_id, state)
 
 @mcp.tool()
-async def read_page(url: str, ctx: Context) -> dict:
+async def read_page(url: str, ctx: Context, offset: int = 1, limit: int = 2000) -> dict:
     state: AppState = ctx.request_context.lifespan_context
-    return await t_read_page.handle(url, state)
+    return await t_read_page.handle(url, offset, limit, state)
 
 def main() -> None:
     mcp.run()   # defaults to stdio; HTTP mode handled via config

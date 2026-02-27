@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from procontext.errors import ErrorCode, ProContextError
+from procontext.fetcher import is_url_allowed
 from procontext.models.tools import ReadPageInput, ReadPageOutput
 from procontext.parser import parse_headings
 
@@ -39,8 +40,18 @@ async def handle(url: str, offset: int, limit: int, state: AppState) -> dict:
             recoverable=False,
         ) from exc
 
-    if state.cache is None or state.fetcher is None:
-        raise RuntimeError("Phase 2 components (cache, fetcher) not initialized")
+    assert state.cache is not None and state.fetcher is not None
+
+    # SSRF check — must happen before cache lookup so that pages from
+    # domains removed from the allowlist are not served from cache.
+    if not is_url_allowed(validated.url, state.allowlist):
+        log.warning("ssrf_blocked", url=validated.url, reason="not_in_allowlist")
+        raise ProContextError(
+            code=ErrorCode.URL_NOT_ALLOWED,
+            message=f"URL not in allowlist: {validated.url}",
+            suggestion="Only URLs from known documentation domains are permitted.",
+            recoverable=False,
+        )
 
     url_hash = hashlib.sha256(validated.url.encode()).hexdigest()
 
@@ -155,8 +166,7 @@ async def _background_refresh(
     log = structlog.get_logger().bind(tool="read_page", url=url)
     log.info("stale_refresh_started", key=f"page:{url_hash}")
     try:
-        if state.fetcher is None or state.cache is None:
-            return
+        assert state.fetcher is not None and state.cache is not None
         content = await state.fetcher.fetch(url, state.allowlist)
         headings = parse_headings(content)
         await state.cache.set_page(
