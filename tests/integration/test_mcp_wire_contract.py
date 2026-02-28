@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import sqlite3
 import subprocess
 import sys
@@ -15,11 +14,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _run_mcp_exchange(tmp_path: Path, messages: list[dict]) -> list[dict]:
-    env = os.environ.copy()
-    env["PROCONTEXT__CACHE__DB_PATH"] = str(tmp_path / "cache.db")
-    # Point to an unlistened port so the first-run blocking fetch fails immediately
-    env["PROCONTEXT__REGISTRY__METADATA_URL"] = "http://127.0.0.1:1/registry_metadata.json"
+def _run_mcp_exchange(env: dict[str, str], messages: list[dict]) -> list[dict]:
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "procontext.server"],
@@ -93,9 +88,9 @@ def _seed_page_cache(
         conn.commit()
 
 
-def test_initialize_and_tools_list_contract(tmp_path: Path) -> None:
+def test_initialize_and_tools_list_contract(subprocess_env: dict[str, str]) -> None:
     responses = _run_mcp_exchange(
-        tmp_path,
+        subprocess_env,
         [
             {
                 "jsonrpc": "2.0",
@@ -141,9 +136,9 @@ def test_initialize_and_tools_list_contract(tmp_path: Path) -> None:
     assert read_page_schema["properties"]["limit"]["type"] == "integer"
 
 
-def test_resolve_library_wire_success(tmp_path: Path) -> None:
+def test_resolve_library_wire_success(subprocess_env: dict[str, str]) -> None:
     responses = _run_mcp_exchange(
-        tmp_path,
+        subprocess_env,
         [
             {
                 "jsonrpc": "2.0",
@@ -176,14 +171,16 @@ def test_resolve_library_wire_success(tmp_path: Path) -> None:
     assert payload["matches"][0]["library_id"] == "langchain"
 
 
-def test_read_page_wire_success_from_cache(tmp_path: Path) -> None:
+def test_read_page_wire_success_from_cache(
+    tmp_path: Path, subprocess_env: dict[str, str]
+) -> None:
     url = "https://python.langchain.com/docs/concepts/cached.md"
     content = "# Title\n\n## Section\nLine A\nLine B"
     headings = "1: # Title\n3: ## Section"
     _seed_page_cache(tmp_path, url=url, content=content, headings=headings)
 
     responses = _run_mcp_exchange(
-        tmp_path,
+        subprocess_env,
         [
             {
                 "jsonrpc": "2.0",
@@ -222,9 +219,9 @@ def test_read_page_wire_success_from_cache(tmp_path: Path) -> None:
     assert payload["content"] == "## Section\nLine A"
 
 
-def test_read_page_wire_error_envelope(tmp_path: Path) -> None:
+def test_read_page_wire_error_envelope(subprocess_env: dict[str, str]) -> None:
     responses = _run_mcp_exchange(
-        tmp_path,
+        subprocess_env,
         [
             {
                 "jsonrpc": "2.0",

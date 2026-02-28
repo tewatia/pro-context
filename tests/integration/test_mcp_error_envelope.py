@@ -3,27 +3,21 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
-def test_procontext_error_serializes_to_structured_tool_error(tmp_path: Path) -> None:
+def test_procontext_error_serializes_to_structured_tool_error(
+    subprocess_env: dict[str, str],
+) -> None:
     """ProContextError should be returned as structured JSON in tool result text."""
-    env = os.environ.copy()
-    env["PROCONTEXT__CACHE__DB_PATH"] = str(tmp_path / "cache.db")
-
     proc = subprocess.Popen(
         [sys.executable, "-m", "procontext.server"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=env,
+        env=subprocess_env,
     )
 
     assert proc.stdin is not None

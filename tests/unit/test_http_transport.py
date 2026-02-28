@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from procontext.server import MCPSecurityMiddleware, SUPPORTED_PROTOCOL_VERSIONS
+from procontext.server import SUPPORTED_PROTOCOL_VERSIONS, MCPSecurityMiddleware
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
