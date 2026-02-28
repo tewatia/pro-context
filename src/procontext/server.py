@@ -227,6 +227,17 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
     cache = Cache(db)
     await cache.init_db()
 
+    # Restore domains discovered in previous sessions so cache hits remain
+    # reachable across restarts when allowlist_depth > 0.
+    if settings.fetcher.allowlist_depth > 0:
+        cached_domains = await cache.load_discovered_domains(
+            include_toc=settings.fetcher.allowlist_depth >= 1,
+            include_pages=settings.fetcher.allowlist_depth >= 2,
+        )
+        if cached_domains:
+            allowlist = allowlist | cached_domains
+            log.info("allowlist_restored_from_cache", domain_count=len(cached_domains))
+
     fetcher = Fetcher(http_client, settings.fetcher)
 
     state = AppState(

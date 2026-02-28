@@ -109,9 +109,11 @@ async def handle(library_id: str, state: AppState) -> dict:
 
     log.info("fetch_complete", content_length=len(content))
 
-    # Depth 1: expand allowlist with domains discovered in llms.txt content
+    # Always extract discovered domains so they're persisted regardless of depth config.
+    # Whether we expand the live allowlist is controlled by allowlist_depth.
+    discovered_domains = extract_base_domains_from_content(content)
     if state.settings.fetcher.allowlist_depth >= 1:
-        new_domains = extract_base_domains_from_content(content) - state.allowlist
+        new_domains = discovered_domains - state.allowlist
         if new_domains:
             state.allowlist = state.allowlist | new_domains
             log.info("allowlist_expanded", added_domains=len(new_domains))
@@ -122,6 +124,7 @@ async def handle(library_id: str, state: AppState) -> dict:
         llms_txt_url=entry.llms_txt_url,
         content=content,
         ttl_hours=state.settings.cache.ttl_hours,
+        discovered_domains=discovered_domains,
     )
 
     output = GetLibraryDocsOutput(
@@ -152,8 +155,9 @@ async def _background_refresh(
             return
         content = await state.fetcher.fetch(llms_txt_url, state.allowlist)
 
+        discovered_domains = extract_base_domains_from_content(content)
         if state.settings.fetcher.allowlist_depth >= 1:
-            new_domains = extract_base_domains_from_content(content) - state.allowlist
+            new_domains = discovered_domains - state.allowlist
             if new_domains:
                 state.allowlist = state.allowlist | new_domains
                 log.info("allowlist_expanded", added_domains=len(new_domains))
@@ -163,6 +167,7 @@ async def _background_refresh(
             llms_txt_url=llms_txt_url,
             content=content,
             ttl_hours=state.settings.cache.ttl_hours,
+            discovered_domains=discovered_domains,
         )
         log.info("stale_refresh_complete", key=f"toc:{library_id}")
     except Exception:

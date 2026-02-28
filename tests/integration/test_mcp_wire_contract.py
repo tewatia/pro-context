@@ -61,12 +61,13 @@ def _seed_page_cache(
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS page_cache (
-                url_hash    TEXT PRIMARY KEY,
-                url         TEXT NOT NULL UNIQUE,
-                content     TEXT NOT NULL,
-                headings    TEXT NOT NULL DEFAULT '',
-                fetched_at  TEXT NOT NULL,
-                expires_at  TEXT NOT NULL
+                url_hash           TEXT PRIMARY KEY,
+                url                TEXT NOT NULL UNIQUE,
+                content            TEXT NOT NULL,
+                headings           TEXT NOT NULL DEFAULT '',
+                discovered_domains TEXT NOT NULL DEFAULT '',
+                fetched_at         TEXT NOT NULL,
+                expires_at         TEXT NOT NULL
             )
             """
         )

@@ -25,6 +25,8 @@ class CacheProtocol(Protocol):
         llms_txt_url: str,
         content: str,
         ttl_hours: int,
+        *,
+        discovered_domains: frozenset[str] = frozenset(),
     ) -> None: ...
 
     async def get_page(self, url_hash: str) -> PageCacheEntry | None: ...
@@ -36,7 +38,13 @@ class CacheProtocol(Protocol):
         content: str,
         headings: str,
         ttl_hours: int,
+        *,
+        discovered_domains: frozenset[str] = frozenset(),
     ) -> None: ...
+
+    async def load_discovered_domains(
+        self, *, include_toc: bool, include_pages: bool
+    ) -> frozenset[str]: ...
 
     async def cleanup_expired(self) -> None: ...
 

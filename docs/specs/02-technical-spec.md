@@ -577,6 +577,8 @@ def is_url_allowed(
 
 At depth 1 and 2, expansion is monotonic (domains are only added, never removed). The allowlist resets to the registry baseline on each registry update. In long-running HTTP mode, the allowlist may grow across sessions until the next registry update.
 
+**Cross-restart persistence**: `discovered_domains` are always extracted from fetched content and written to the SQLite cache — even at depth 0 — so they are available if the operator later enables deeper expansion. At startup, `Cache.load_discovered_domains()` reads all `discovered_domains` from `toc_cache` (depth ≥ 1) and `page_cache` (depth ≥ 2) and merges them into the initial allowlist. This ensures that cached pages from a previous session remain reachable after a server restart, and avoids the performance cost of re-running domain extraction on every server start.
+
 **Known limitation**: Two-label base domain extraction is a simplification of proper eTLD+1 calculation. For shared hosting platforms like `github.io` or `readthedocs.io`, the base domain would be `github.io` or `readthedocs.io` — permitting all projects hosted there, not just the registered library. This is an acceptable trade-off for v1; a future version could adopt the `tldextract` library for accurate Public Suffix List-based matching.
 
 ### 5.3 Redirect Handling
@@ -643,20 +645,22 @@ PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS toc_cache (
-    library_id   TEXT PRIMARY KEY,
-    llms_txt_url TEXT NOT NULL,
-    content      TEXT NOT NULL,
-    fetched_at   TEXT NOT NULL,   -- ISO 8601
-    expires_at   TEXT NOT NULL    -- ISO 8601
+    library_id         TEXT PRIMARY KEY,
+    llms_txt_url       TEXT NOT NULL,
+    content            TEXT NOT NULL,
+    discovered_domains TEXT NOT NULL DEFAULT '', -- Space-separated base domains extracted from content
+    fetched_at         TEXT NOT NULL,            -- ISO 8601
+    expires_at         TEXT NOT NULL             -- ISO 8601
 );
 
 CREATE TABLE IF NOT EXISTS page_cache (
-    url_hash    TEXT PRIMARY KEY,             -- SHA-256(url)
-    url         TEXT NOT NULL UNIQUE,
-    content     TEXT NOT NULL,
-    headings    TEXT NOT NULL DEFAULT '',     -- Plain-text heading map
-    fetched_at  TEXT NOT NULL,
-    expires_at  TEXT NOT NULL
+    url_hash           TEXT PRIMARY KEY,             -- SHA-256(url)
+    url                TEXT NOT NULL UNIQUE,
+    content            TEXT NOT NULL,
+    headings           TEXT NOT NULL DEFAULT '',     -- Plain-text heading map
+    discovered_domains TEXT NOT NULL DEFAULT '',     -- Space-separated base domains extracted from content
+    fetched_at         TEXT NOT NULL,
+    expires_at         TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_toc_expires   ON toc_cache(expires_at);
@@ -664,6 +668,8 @@ CREATE INDEX IF NOT EXISTS idx_page_expires  ON page_cache(expires_at);
 ```
 
 **Why TEXT for timestamps**: SQLite has no native datetime type. ISO 8601 strings (`"2026-02-23T10:00:00Z"`) sort lexicographically as datetimes, making range queries on `expires_at` correct without any conversion.
+
+**`discovered_domains` column**: Stores the base domains (`example.com`, `docs.dev`) extracted from fetched content by `extract_base_domains_from_content`. Serialised as a space-separated string (base domains never contain spaces). Written unconditionally on every cache write — regardless of the current `allowlist_depth` config — so the data is always available if the operator later enables deeper allowlist expansion. At startup, `Cache.load_discovered_domains()` reads all non-empty `discovered_domains` values from `toc_cache` and/or `page_cache` and merges them back into the in-memory allowlist (subject to `allowlist_depth`). This restores cross-restart continuity for the runtime-expanded allowlist.
 
 **Cleanup**: A periodic task (runs at startup and every 6 hours thereafter) deletes entries where `expires_at < now() - 7 days`. Stale entries are kept up to 7 days to allow stale-while-revalidate to function even if the source is temporarily unreachable.
 

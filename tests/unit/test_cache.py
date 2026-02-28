@@ -74,6 +74,30 @@ class TestTocCache:
         assert entry is not None
         assert entry.content == "Version 2"
 
+    async def test_discovered_domains_persisted(self, cache: Cache) -> None:
+        domains = frozenset({"example.com", "docs.dev"})
+        await cache.set_toc(
+            library_id="lib",
+            llms_txt_url="https://example.com/llms.txt",
+            content="Content",
+            ttl_hours=24,
+            discovered_domains=domains,
+        )
+        entry = await cache.get_toc("lib")
+        assert entry is not None
+        assert entry.discovered_domains == domains
+
+    async def test_discovered_domains_defaults_empty(self, cache: Cache) -> None:
+        await cache.set_toc(
+            library_id="lib",
+            llms_txt_url="https://example.com/llms.txt",
+            content="Content",
+            ttl_hours=24,
+        )
+        entry = await cache.get_toc("lib")
+        assert entry is not None
+        assert entry.discovered_domains == frozenset()
+
     async def test_read_failure_returns_none(self, cache: Cache) -> None:
         """Simulate a database read error — should return None, not raise."""
         original_execute = cache._db.execute
@@ -149,6 +173,32 @@ class TestPageCache:
         assert entry is not None
         assert entry.stale is True
 
+    async def test_discovered_domains_persisted(self, cache: Cache) -> None:
+        domains = frozenset({"foo.com", "bar.io"})
+        await cache.set_page(
+            url="https://example.com/docs/page1",
+            url_hash="h1",
+            content="# Page",
+            headings="1: # Page",
+            ttl_hours=24,
+            discovered_domains=domains,
+        )
+        entry = await cache.get_page("h1")
+        assert entry is not None
+        assert entry.discovered_domains == domains
+
+    async def test_discovered_domains_defaults_empty(self, cache: Cache) -> None:
+        await cache.set_page(
+            url="https://example.com/docs/page2",
+            url_hash="h2",
+            content="# Page",
+            headings="",
+            ttl_hours=24,
+        )
+        entry = await cache.get_page("h2")
+        assert entry is not None
+        assert entry.discovered_domains == frozenset()
+
 
 # ---------------------------------------------------------------------------
 # cleanup_expired
@@ -209,4 +259,88 @@ class TestCleanupExpired:
         cache._db.execute = failing_execute  # type: ignore[assignment]
         # Should not raise
         await cache.cleanup_expired()
+        cache._db.execute = original_execute  # type: ignore[assignment]
+
+
+# ---------------------------------------------------------------------------
+# load_discovered_domains
+# ---------------------------------------------------------------------------
+
+
+class TestLoadDiscoveredDomains:
+    async def test_loads_toc_domains(self, cache: Cache) -> None:
+        await cache.set_toc(
+            library_id="lib",
+            llms_txt_url="https://example.com/llms.txt",
+            content="Content",
+            ttl_hours=24,
+            discovered_domains=frozenset({"example.com", "docs.dev"}),
+        )
+        result = await cache.load_discovered_domains(include_toc=True, include_pages=False)
+        assert "example.com" in result
+        assert "docs.dev" in result
+
+    async def test_loads_page_domains(self, cache: Cache) -> None:
+        await cache.set_page(
+            url="https://example.com/page",
+            url_hash="h1",
+            content="# Page",
+            headings="",
+            ttl_hours=24,
+            discovered_domains=frozenset({"foo.com"}),
+        )
+        result = await cache.load_discovered_domains(include_toc=False, include_pages=True)
+        assert "foo.com" in result
+
+    async def test_merges_toc_and_page_domains(self, cache: Cache) -> None:
+        await cache.set_toc(
+            library_id="lib",
+            llms_txt_url="https://example.com/llms.txt",
+            content="Content",
+            ttl_hours=24,
+            discovered_domains=frozenset({"toc.com"}),
+        )
+        await cache.set_page(
+            url="https://example.com/page",
+            url_hash="h1",
+            content="# Page",
+            headings="",
+            ttl_hours=24,
+            discovered_domains=frozenset({"page.io"}),
+        )
+        result = await cache.load_discovered_domains(include_toc=True, include_pages=True)
+        assert "toc.com" in result
+        assert "page.io" in result
+
+    async def test_both_false_returns_empty(self, cache: Cache) -> None:
+        await cache.set_toc(
+            library_id="lib",
+            llms_txt_url="https://example.com/llms.txt",
+            content="Content",
+            ttl_hours=24,
+            discovered_domains=frozenset({"example.com"}),
+        )
+        result = await cache.load_discovered_domains(include_toc=False, include_pages=False)
+        assert result == frozenset()
+
+    async def test_skips_entries_with_no_domains(self, cache: Cache) -> None:
+        await cache.set_toc(
+            library_id="empty",
+            llms_txt_url="https://example.com/llms.txt",
+            content="Content",
+            ttl_hours=24,
+        )
+        result = await cache.load_discovered_domains(include_toc=True, include_pages=False)
+        assert result == frozenset()
+
+    async def test_failure_returns_empty(self, cache: Cache) -> None:
+        """Database errors during load should return empty frozenset, not raise."""
+        original_execute = cache._db.execute
+
+        async def failing_execute(*args, **kwargs):
+            raise aiosqlite.OperationalError("disk I/O error")
+
+        cache._db.execute = failing_execute  # type: ignore[assignment]
+        result = await cache.load_discovered_domains(include_toc=True, include_pages=True)
+        assert result == frozenset()
         cache._db.execute = original_execute  # type: ignore[assignment]

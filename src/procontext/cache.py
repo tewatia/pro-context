@@ -26,22 +26,24 @@ log = structlog.get_logger()
 
 _CREATE_TOC_TABLE = """
 CREATE TABLE IF NOT EXISTS toc_cache (
-    library_id   TEXT PRIMARY KEY,
-    llms_txt_url TEXT NOT NULL,
-    content      TEXT NOT NULL,
-    fetched_at   TEXT NOT NULL,
-    expires_at   TEXT NOT NULL
+    library_id         TEXT PRIMARY KEY,
+    llms_txt_url       TEXT NOT NULL,
+    content            TEXT NOT NULL,
+    discovered_domains TEXT NOT NULL DEFAULT '',
+    fetched_at         TEXT NOT NULL,
+    expires_at         TEXT NOT NULL
 )
 """
 
 _CREATE_PAGE_TABLE = """
 CREATE TABLE IF NOT EXISTS page_cache (
-    url_hash    TEXT PRIMARY KEY,
-    url         TEXT NOT NULL UNIQUE,
-    content     TEXT NOT NULL,
-    headings    TEXT NOT NULL DEFAULT '',
-    fetched_at  TEXT NOT NULL,
-    expires_at  TEXT NOT NULL
+    url_hash           TEXT PRIMARY KEY,
+    url                TEXT NOT NULL UNIQUE,
+    content            TEXT NOT NULL,
+    headings           TEXT NOT NULL DEFAULT '',
+    discovered_domains TEXT NOT NULL DEFAULT '',
+    fetched_at         TEXT NOT NULL,
+    expires_at         TEXT NOT NULL
 )
 """
 
@@ -73,22 +75,23 @@ class Cache:
         """Read a ToC entry. Returns ``None`` on cache miss or read failure."""
         try:
             cursor = await self._db.execute(
-                "SELECT library_id, llms_txt_url, content, fetched_at, expires_at "
-                "FROM toc_cache WHERE library_id = ?",
+                "SELECT library_id, llms_txt_url, content, discovered_domains, "
+                "fetched_at, expires_at FROM toc_cache WHERE library_id = ?",
                 (library_id,),
             )
             row = await cursor.fetchone()
             if row is None:
                 return None
 
-            fetched_at = datetime.fromisoformat(row[3])
-            expires_at = datetime.fromisoformat(row[4])
+            fetched_at = datetime.fromisoformat(row[4])
+            expires_at = datetime.fromisoformat(row[5])
             stale = datetime.now(UTC) > expires_at
 
             return TocCacheEntry(
                 library_id=row[0],
                 llms_txt_url=row[1],
                 content=row[2],
+                discovered_domains=frozenset(row[3].split()),
                 fetched_at=fetched_at,
                 expires_at=expires_at,
                 stale=stale,
@@ -103,6 +106,8 @@ class Cache:
         llms_txt_url: str,
         content: str,
         ttl_hours: int,
+        *,
+        discovered_domains: frozenset[str] = frozenset(),
     ) -> None:
         """Write a ToC entry. Non-fatal on failure."""
         try:
@@ -110,9 +115,16 @@ class Cache:
             expires_at = now + timedelta(hours=ttl_hours)
             await self._db.execute(
                 "INSERT OR REPLACE INTO toc_cache "
-                "(library_id, llms_txt_url, content, fetched_at, expires_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (library_id, llms_txt_url, content, now.isoformat(), expires_at.isoformat()),
+                "(library_id, llms_txt_url, content, discovered_domains, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    library_id,
+                    llms_txt_url,
+                    content,
+                    " ".join(sorted(discovered_domains)),
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                ),
             )
             await self._db.commit()
         except aiosqlite.Error:
@@ -126,16 +138,16 @@ class Cache:
         """Read a page entry. Returns ``None`` on cache miss or read failure."""
         try:
             cursor = await self._db.execute(
-                "SELECT url_hash, url, content, headings, fetched_at, expires_at "
-                "FROM page_cache WHERE url_hash = ?",
+                "SELECT url_hash, url, content, headings, discovered_domains, "
+                "fetched_at, expires_at FROM page_cache WHERE url_hash = ?",
                 (url_hash,),
             )
             row = await cursor.fetchone()
             if row is None:
                 return None
 
-            fetched_at = datetime.fromisoformat(row[4])
-            expires_at = datetime.fromisoformat(row[5])
+            fetched_at = datetime.fromisoformat(row[5])
+            expires_at = datetime.fromisoformat(row[6])
             stale = datetime.now(UTC) > expires_at
 
             return PageCacheEntry(
@@ -143,6 +155,7 @@ class Cache:
                 url=row[1],
                 content=row[2],
                 headings=row[3],
+                discovered_domains=frozenset(row[4].split()),
                 fetched_at=fetched_at,
                 expires_at=expires_at,
                 stale=stale,
@@ -158,6 +171,8 @@ class Cache:
         content: str,
         headings: str,
         ttl_hours: int,
+        *,
+        discovered_domains: frozenset[str] = frozenset(),
     ) -> None:
         """Write a page entry. Non-fatal on failure."""
         try:
@@ -165,13 +180,54 @@ class Cache:
             expires_at = now + timedelta(hours=ttl_hours)
             await self._db.execute(
                 "INSERT OR REPLACE INTO page_cache "
-                "(url_hash, url, content, headings, fetched_at, expires_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (url_hash, url, content, headings, now.isoformat(), expires_at.isoformat()),
+                "(url_hash, url, content, headings, discovered_domains, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    url_hash,
+                    url,
+                    content,
+                    headings,
+                    " ".join(sorted(discovered_domains)),
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                ),
             )
             await self._db.commit()
         except aiosqlite.Error:
             log.warning("cache_write_error", key=f"page:{url_hash}", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Allowlist restoration
+    # ------------------------------------------------------------------
+
+    async def load_discovered_domains(
+        self, *, include_toc: bool, include_pages: bool
+    ) -> frozenset[str]:
+        """Collect all discovered domains from cached entries.
+
+        Used at startup to restore the in-memory allowlist from the previous
+        session. Non-fatal on database failure — returns empty frozenset.
+        """
+        if not include_toc and not include_pages:
+            return frozenset()
+        try:
+            domains: set[str] = set()
+            if include_toc:
+                cursor = await self._db.execute(
+                    "SELECT discovered_domains FROM toc_cache WHERE discovered_domains != ''"
+                )
+                for row in await cursor.fetchall():
+                    domains.update(row[0].split())
+            if include_pages:
+                cursor = await self._db.execute(
+                    "SELECT discovered_domains FROM page_cache WHERE discovered_domains != ''"
+                )
+                for row in await cursor.fetchall():
+                    domains.update(row[0].split())
+            return frozenset(domains)
+        except aiosqlite.Error:
+            log.warning("cache_load_discovered_domains_error", exc_info=True)
+            return frozenset()
 
     # ------------------------------------------------------------------
     # Maintenance

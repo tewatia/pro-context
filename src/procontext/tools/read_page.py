@@ -106,9 +106,11 @@ async def handle(url: str, offset: int, limit: int, state: AppState) -> dict:
 
     log.info("fetch_complete", content_length=len(content))
 
-    # Depth 2: expand allowlist with domains discovered in fetched page content
+    # Always extract discovered domains so they're persisted regardless of depth config.
+    # Whether we expand the live allowlist is controlled by allowlist_depth.
+    discovered_domains = extract_base_domains_from_content(content)
     if state.settings.fetcher.allowlist_depth >= 2:
-        new_domains = extract_base_domains_from_content(content) - state.allowlist
+        new_domains = discovered_domains - state.allowlist
         if new_domains:
             state.allowlist = state.allowlist | new_domains
             log.info("allowlist_expanded", added_domains=len(new_domains))
@@ -120,6 +122,7 @@ async def handle(url: str, offset: int, limit: int, state: AppState) -> dict:
         content=content,
         headings=headings,
         ttl_hours=state.settings.cache.ttl_hours,
+        discovered_domains=discovered_domains,
     )
 
     return _build_output(
@@ -185,8 +188,9 @@ async def _background_refresh(
         content = await state.fetcher.fetch(url, state.allowlist)
         headings = parse_headings(content)
 
+        discovered_domains = extract_base_domains_from_content(content)
         if state.settings.fetcher.allowlist_depth >= 2:
-            new_domains = extract_base_domains_from_content(content) - state.allowlist
+            new_domains = discovered_domains - state.allowlist
             if new_domains:
                 state.allowlist = state.allowlist | new_domains
                 log.info("allowlist_expanded", added_domains=len(new_domains))
@@ -197,6 +201,7 @@ async def _background_refresh(
             content=content,
             headings=headings,
             ttl_hours=state.settings.cache.ttl_hours,
+            discovered_domains=discovered_domains,
         )
         log.info("stale_refresh_complete", key=f"page:{url_hash}")
     except Exception:
