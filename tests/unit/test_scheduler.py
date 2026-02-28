@@ -17,7 +17,6 @@ from procontext.registry import (
     REGISTRY_INITIAL_BACKOFF_SECONDS,
     REGISTRY_MAX_BACKOFF_SECONDS,
     REGISTRY_MAX_TRANSIENT_BACKOFF_ATTEMPTS,
-    REGISTRY_SUCCESS_INTERVAL_SECONDS,
     RegistryIndexes,
 )
 from procontext.server import _run_registry_update_scheduler
@@ -84,7 +83,7 @@ class TestSchedulerHttpMode:
         ):
             await _run_registry_update_scheduler(state)
 
-        assert sleep_durations[0] == REGISTRY_SUCCESS_INTERVAL_SECONDS
+        assert sleep_durations[0] == state.settings.registry.poll_interval_hours * 3600
 
     async def test_semantic_failure_sleeps_24h(self) -> None:
         state = _make_state(transport="http")
@@ -103,7 +102,7 @@ class TestSchedulerHttpMode:
         ):
             await _run_registry_update_scheduler(state)
 
-        assert sleep_durations[0] == REGISTRY_SUCCESS_INTERVAL_SECONDS
+        assert sleep_durations[0] == state.settings.registry.poll_interval_hours * 3600
 
     async def test_transient_failure_uses_backoff(self) -> None:
         state = _make_state(transport="http")
@@ -171,7 +170,7 @@ class TestSchedulerHttpMode:
         ):
             await _run_registry_update_scheduler(state)
 
-        assert sleep_durations[-1] == REGISTRY_SUCCESS_INTERVAL_SECONDS
+        assert sleep_durations[-1] == state.settings.registry.poll_interval_hours * 3600
 
     async def test_circuit_breaker_resets_counter(self) -> None:
         state = _make_state(transport="http")
@@ -195,7 +194,7 @@ class TestSchedulerHttpMode:
         ):
             await _run_registry_update_scheduler(state)
 
-        assert sleep_durations[-2] == REGISTRY_SUCCESS_INTERVAL_SECONDS
+        assert sleep_durations[-2] == state.settings.registry.poll_interval_hours * 3600
         assert sleep_durations[-1] == REGISTRY_INITIAL_BACKOFF_SECONDS
 
     async def test_success_resets_backoff(self) -> None:
@@ -220,7 +219,7 @@ class TestSchedulerHttpMode:
 
         assert sleep_durations[0] == REGISTRY_INITIAL_BACKOFF_SECONDS
         assert sleep_durations[1] == REGISTRY_INITIAL_BACKOFF_SECONDS * 2
-        assert sleep_durations[2] == REGISTRY_SUCCESS_INTERVAL_SECONDS
+        assert sleep_durations[2] == state.settings.registry.poll_interval_hours * 3600
         assert sleep_durations[3] == REGISTRY_INITIAL_BACKOFF_SECONDS
 
     async def test_unexpected_exception_treated_as_semantic(self) -> None:
@@ -240,4 +239,4 @@ class TestSchedulerHttpMode:
         ):
             await _run_registry_update_scheduler(state)
 
-        assert sleep_durations[0] == REGISTRY_SUCCESS_INTERVAL_SECONDS
+        assert sleep_durations[0] == state.settings.registry.poll_interval_hours * 3600

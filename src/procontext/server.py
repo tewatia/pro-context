@@ -40,7 +40,6 @@ from procontext.registry import (
     REGISTRY_INITIAL_BACKOFF_SECONDS,
     REGISTRY_MAX_BACKOFF_SECONDS,
     REGISTRY_MAX_TRANSIENT_BACKOFF_ATTEMPTS,
-    REGISTRY_SUCCESS_INTERVAL_SECONDS,
     build_indexes,
     check_for_registry_update,
     load_registry,
@@ -185,10 +184,12 @@ async def _run_registry_update_scheduler(
             log.warning("registry_update_scheduler_error", mode="http_loop", exc_info=True)
             outcome = "semantic_failure"
 
+        poll_interval_seconds = state.settings.registry.poll_interval_hours * 3600
+
         if outcome == "success":
             consecutive_transient_failures = 0
             backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
-            await asyncio.sleep(REGISTRY_SUCCESS_INTERVAL_SECONDS)
+            await asyncio.sleep(poll_interval_seconds)
             continue
 
         if outcome == "transient_failure":
@@ -197,11 +198,11 @@ async def _run_registry_update_scheduler(
                 log.warning(
                     "registry_update_transient_retry_suspended",
                     consecutive_failures=consecutive_transient_failures,
-                    cooldown_seconds=REGISTRY_SUCCESS_INTERVAL_SECONDS,
+                    cooldown_seconds=poll_interval_seconds,
                 )
                 consecutive_transient_failures = 0
                 backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
-                await asyncio.sleep(REGISTRY_SUCCESS_INTERVAL_SECONDS)
+                await asyncio.sleep(poll_interval_seconds)
                 continue
 
             await asyncio.sleep(_jittered_delay(backoff_seconds))
@@ -211,7 +212,7 @@ async def _run_registry_update_scheduler(
         # semantic failure
         consecutive_transient_failures = 0
         backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
-        await asyncio.sleep(REGISTRY_SUCCESS_INTERVAL_SECONDS)
+        await asyncio.sleep(poll_interval_seconds)
 
 
 @asynccontextmanager
@@ -236,7 +237,7 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
     indexes = build_indexes(entries)
 
     # Phase 2: HTTP client, SSRF allowlist, cache, fetcher
-    http_client = build_http_client()
+    http_client = build_http_client(settings.fetcher)
     allowlist = build_allowlist(entries, extra_domains=settings.fetcher.extra_allowed_domains)
 
     db_path = Path(settings.cache.db_path).expanduser()

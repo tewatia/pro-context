@@ -34,7 +34,13 @@ def normalise_query(raw: str) -> str:
     return query
 
 
-def resolve_library(query: str, indexes: RegistryIndexes) -> list[LibraryMatch]:
+def resolve_library(
+    query: str,
+    indexes: RegistryIndexes,
+    *,
+    fuzzy_score_cutoff: int = 70,
+    fuzzy_max_results: int = 5,
+) -> list[LibraryMatch]:
     """Resolve a query to matching libraries using the 5-step algorithm.
 
     Returns on first hit for steps 1-3 (exact matches).
@@ -63,7 +69,13 @@ def resolve_library(query: str, indexes: RegistryIndexes) -> list[LibraryMatch]:
         return [_match_from_entry(entry, matched_via="alias", relevance=1.0)]
 
     # Step 4: Fuzzy match
-    matches = _fuzzy_search(normalised, indexes.fuzzy_corpus, indexes.by_id)
+    matches = _fuzzy_search(
+        normalised,
+        indexes.fuzzy_corpus,
+        indexes.by_id,
+        limit=fuzzy_max_results,
+        score_cutoff=fuzzy_score_cutoff,
+    )
     if matches:
         return matches
 
@@ -93,6 +105,7 @@ def _fuzzy_search(
     corpus: list[tuple[str, str]],
     by_id: dict[str, RegistryEntry],
     limit: int = 5,
+    score_cutoff: int = 70,
 ) -> list[LibraryMatch]:
     """Fuzzy match against the corpus using Levenshtein distance.
 
@@ -105,7 +118,7 @@ def _fuzzy_search(
         terms,
         scorer=fuzz.ratio,
         limit=limit,
-        score_cutoff=70,
+        score_cutoff=score_cutoff,
     )
 
     seen: set[str] = set()

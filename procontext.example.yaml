@@ -9,26 +9,38 @@
 #   PROCONTEXT__LOGGING__LEVEL=DEBUG
 
 server:
-  transport: stdio # stdio | http
-  host: "0.0.0.0" # HTTP mode only
-  port: 8080 # HTTP mode only
-  auth_enabled: false # HTTP mode only — auth disabled by default
-  auth_key: "" # HTTP mode only — used when auth_enabled=true; if empty, auto-generated at startup
+  transport: stdio     # stdio | http
+  host: "0.0.0.0"     # HTTP mode only — address to bind the server to
+  port: 8080           # HTTP mode only — port to listen on
+  auth_enabled: false  # HTTP mode only — enable bearer key authentication
+  auth_key: ""         # HTTP mode only — key checked against Authorization header;
+                       # if empty and auth_enabled=true, a random key is generated at startup
 
 registry:
   url: "https://procontext.github.io/known-libraries.json"
   metadata_url: "https://procontext.github.io/registry_metadata.json"
+  # How often to check for registry updates in HTTP mode (stdio checks once at startup).
+  # Lower values keep library metadata fresher; higher values reduce outbound traffic.
+  poll_interval_hours: 24
 
 cache:
+  # How long fetched content is considered fresh before triggering a background re-fetch.
+  # Applies to both llms.txt files (get_library_docs) and documentation pages (read_page).
   ttl_hours: 24
   # db_path default is platform-specific (via platformdirs):
   #   Linux:   ~/.local/share/procontext/cache.db
   #   macOS:   ~/Library/Application Support/procontext/cache.db
   #   Windows: C:\Users\<user>\AppData\Local\procontext\cache.db
   # db_path: "/custom/path/to/cache.db"
+  # How often the background cleanup task removes entries expired more than 7 days ago.
   cleanup_interval_hours: 6
 
 fetcher:
+  # Timeout (in seconds) for each HTTP request to a documentation source.
+  # Increase if you regularly fetch large pages or are on a slow network.
+  # Applies to every fetch made by get_library_docs and read_page.
+  request_timeout_seconds: 30
+
   # Block requests to private/internal IP ranges (10.x.x.x, 192.168.x.x, 127.x.x.x,
   # ::1, fc00::/7, etc.). Strongly recommended to keep enabled — disabling this allows
   # ProContext to reach internal network services, which may expose sensitive endpoints.
@@ -72,6 +84,17 @@ fetcher:
     - github.com           # GitHub repository pages and documentation
     - githubusercontent.com # Raw GitHub file content (raw.githubusercontent.com)
 
+resolver:
+  # Minimum similarity score (0–100) for a fuzzy match to be included in results.
+  # Higher values require closer matches and reduce false positives; lower values
+  # cast a wider net and help with unusual or abbreviated queries.
+  fuzzy_score_cutoff: 70
+
+  # Maximum number of fuzzy match candidates returned by resolve_library.
+  # Exact matches (package name, library ID, alias) always return a single result
+  # regardless of this setting — it only caps the fuzzy fallback step.
+  fuzzy_max_results: 5
+
 logging:
-  level: INFO # DEBUG | INFO | WARNING | ERROR
+  level: INFO  # DEBUG | INFO | WARNING | ERROR
   format: json # json | text  (use text for local development)

@@ -35,7 +35,12 @@ async def handle(query: str, state: AppState) -> dict:
             recoverable=False,
         ) from exc
 
-    matches = resolve_library(validated.query, state.indexes)
+    matches = resolve_library(
+        validated.query,
+        state.indexes,
+        fuzzy_score_cutoff=state.settings.resolver.fuzzy_score_cutoff,
+        fuzzy_max_results=state.settings.resolver.fuzzy_max_results,
+    )
     log.info("resolve_complete", match_count=len(matches))
 
     output = ResolveLibraryOutput(matches=matches)

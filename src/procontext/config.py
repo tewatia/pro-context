@@ -49,6 +49,7 @@ class ServerSettings(BaseModel):
 class RegistrySettings(BaseModel):
     url: str = "https://procontext.github.io/known-libraries.json"
     metadata_url: str = "https://procontext.github.io/registry_metadata.json"
+    poll_interval_hours: int = 24
 
 
 class CacheSettings(BaseModel):
@@ -62,6 +63,12 @@ class FetcherSettings(BaseModel):
     ssrf_domain_check: bool = True
     allowlist_depth: Literal[0, 1, 2] = 0
     extra_allowed_domains: list[str] = ["github.com", "githubusercontent.com"]
+    request_timeout_seconds: float = 30.0
+
+
+class ResolverSettings(BaseModel):
+    fuzzy_score_cutoff: int = 70
+    fuzzy_max_results: int = 5
 
 
 class LoggingSettings(BaseModel):
@@ -82,6 +89,7 @@ class Settings(BaseSettings):
     registry: RegistrySettings = RegistrySettings()
     cache: CacheSettings = CacheSettings()
     fetcher: FetcherSettings = FetcherSettings()
+    resolver: ResolverSettings = ResolverSettings()
     logging: LoggingSettings = LoggingSettings()
 
     @classmethod
