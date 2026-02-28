@@ -21,6 +21,7 @@ The initial release ships a complete, production-ready MCP server:
 No features are currently planned for v0.2. Future work will be driven by issues, community feedback, and registry growth. Candidates include:
 
 - Expanded registry coverage (more libraries, MCP servers, frameworks)
+- Docker image for HTTP transport deployments
 - Support for additional documentation formats beyond llms.txt
 - Performance improvements for high-concurrency HTTP deployments
 

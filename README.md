@@ -1,218 +1,38 @@
+<div align="center">
+
 # ProContext
 
-**MCP documentation server that provides AI coding agents with accurate, up-to-date documentation to prevent API hallucination.**
+**Accurate, live library documentation for AI coding agents.**
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![MCP](https://img.shields.io/badge/MCP-2025--11--25-green.svg)](https://modelcontextprotocol.io)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![MCP 2025-11-25](https://img.shields.io/badge/MCP-2025--11--25-green.svg)](https://modelcontextprotocol.io)
+[![llms.txt](https://img.shields.io/badge/llms.txt-supported-blue)](https://llmstxt.org)
 
-ProContext is an open-source [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that delivers accurate, fresh documentation to AI coding agents like Claude Code, Cursor, and Windsurf. It prevents hallucinated APIs by serving real documentation from Python libraries, MCP servers, GitHub projects, and any source that publishes [llms.txt](https://llmstxt.org) files.
+</div>
 
-> ⚠️ **Project Status**: **Phase 4 complete** (registry, resolution, fetcher, cache, page reading, HTTP transport implemented). Phase 5 (registry updates, CI/CD, packaging) is next. Not yet packaged for end users — see [Development Status](#development-status) below.
-
----
-
-## The Problem
-
-AI coding agents often hallucinate outdated or incorrect API details because:
-
-- They're trained on old data
-- Documentation changes frequently
-- They lack access to current library docs
-
-**ProContext solves this** by giving agents on-demand access to fresh, curated documentation.
+ProContext is an open-source [MCP](https://modelcontextprotocol.io) server that gives AI coding agents - Claude Code, Cursor, Windsurf - accurate, up-to-date documentation for the libraries they write code with. It prevents hallucinated APIs by serving real documentation on demand from a curated, pre-validated registry.
 
 ---
 
-## How ProContext Differs
+## Quick Start
 
-Existing documentation tools fall into two categories, each with limitations:
-
-| Approach               | Examples               | Accuracy | Limitation                                                                            |
-| ---------------------- | ---------------------- | -------- | ------------------------------------------------------------------------------------- |
-| **Server-Side Search** | Context7, Deepcon      | 65-75%   | Server must interpret vague user intent; requires expensive query understanding model |
-| **Agent-Side RAG**     | Custom implementations | 90%+     | High accuracy but brittle — agent must discover and validate sources itself           |
-| **ProContext**         | _This project_         | **90%+** | Agent navigates pre-validated, always-fresh sources; no discovery overhead            |
-
-**Key differentiators:**
-
-- **Registry-first resolution** — <10ms library lookup from a pre-built curated registry; no runtime discovery calls
-- **Pre-processed sources** — Documentation URLs are validated at build time, not discovered at query time
-- **Agent-driven navigation** — The agent's LLM reads the TOC and navigates to exactly what it needs; no server-side guessing
-- **llms.txt native** — Purpose-built for AI-optimized documentation format
-- **Always fresh** — On-demand fetching with a 24hr cache; never serves stale docs
-
----
-
-## Features
-
-### ✅ Implemented (Phases 0–4)
-
-### 🎯 **Curated Registry**
-
-- Pre-validated documentation sources for Python libraries, MCP servers, GitHub projects, and standalone tools
-- <10ms library lookup from an in-memory index built at startup
-- Fuzzy matching — finds the right library even with typos or pip-style specifiers (`langchain>=0.1`)
-
-### 📄 **llms.txt Support**
-
-- Native support for the [llms.txt standard](https://llmstxt.org) (AI-optimized documentation)
-- Fetches and parses TOC from llms.txt on demand
-- Serves individual documentation pages via `read_page` with line-range windowing and heading extraction
-
-### ⚡ **Fast & Efficient**
-
-- **First query**: 2-5 seconds (fetch + parse + cache)
-- **Subsequent queries**: <100ms (served from SQLite cache)
-- Stale-while-revalidate — returns cached content immediately, refreshes in the background
-- Incremental loading: only fetches documentation that is actually used
-
-### 🔍 **Agent-Driven Navigation**
-
-- The agent reads the table of contents (`get_library_docs`) and navigates to specific pages (`read_page`)
-- No server-side keyword search or query interpretation — the agent's LLM already knows what it's looking for
-- Heading extraction lets the agent jump directly to relevant sections
-
-### 🔄 **Always Fresh**
-
-- On-demand fetching ensures documentation is never stale
-- Automatic background refresh when cache expires (24hr TTL)
-- Serves latest documentation regardless of package version
-
-### 🛡️ **SSRF Protection**
-
-- Domain allowlist derived from the registry — the server only fetches from known, pre-validated hosts
-- Private IP ranges blocked at the redirect level — attackers cannot redirect fetches to internal services
-
----
-
-### 🔧 **HTTP Transport**
-
-- Streamable HTTP transport (MCP spec 2025-11-25) for remote/shared deployments
-- `MCPSecurityMiddleware` — origin validation (DNS rebinding protection), optional bearer key auth, protocol version enforcement
-- Configurable via `procontext.yaml` or `PROCONTEXT__SERVER__*` environment variables
-
----
-
-### 🚧 Coming Soon (Phase 5)
-
-### 🔁 **Automatic Registry Updates**
-
-- Background registry update check (every 24 hours in HTTP mode)
-- Weekly automated registry builds to discover new documentation sources
-- 1000+ pre-validated projects at launch
-
----
-
-## Supported Documentation Sources
-
-ProContext supports documentation from:
-
-| Type                 | Examples                         | How It Works                                           |
-| -------------------- | -------------------------------- | ------------------------------------------------------ |
-| **Python Libraries** | langchain, fastapi, pydantic     | Discovered via PyPI, fetches llms.txt or GitHub README |
-| **MCP Servers**      | @modelcontextprotocol/server-\*  | Registered in curated list, fetches from llms.txt      |
-| **GitHub Projects**  | svelte, supabase, anthropic      | Builder converts GitHub /docs/ or README to llms.txt   |
-| **Custom Docs**      | Internal tools, private projects | Add via custom sources config                          |
-
-**Supported formats:**
-
-- ✅ llms.txt (AI-optimized markdown)
-- ✅ GitHub README.md
-- ✅ GitHub /docs/ directories
-- 🚧 HTML documentation sites (future)
-
----
-
-## Architecture
-
-ProContext uses a **registry-first, lazy-fetch** architecture:
-
-```
-┌─────────────────────────────────────────────────┐
-│ Build Time: Registry Construction              │
-│ • Discover 1000+ projects (PyPI, GitHub, hubs) │
-│ • Validate llms.txt URLs                        │
-│ • Output: known-libraries.json                  │
-└─────────────────────────────────────────────────┘
-                      ↓
-┌─────────────────────────────────────────────────┐
-│ Runtime: Documentation Server                   │
-│ • Load registry into memory (fast lookups)     │
-│ • Fetch docs on-demand when agent queries      │
-│ • Cache aggressively (SQLite, 24hr TTL)        │
-│ • Agent navigates TOC and pages directly       │
-└─────────────────────────────────────────────────┘
-```
-
-**Key principles:**
-
-- **Registry-only resolution**: No runtime network calls for discovery; all sources pre-validated at build time
-- **On-demand content fetching**: Only fetch docs that are actually used
-- **Agent-driven navigation**: Agents read the TOC and navigate pages directly — no server-side search or query interpretation
-- **Always latest**: No version-specific docs, always serves current documentation
-
----
-
-## Development Status
-
-**Current Phase**: Phase 5 — Registry Updates & Polish
-
-Phases 0 through 4 are complete. The server skeleton, configuration, data models, registry loader, fuzzy resolver, `resolve_library` tool, httpx fetcher with SSRF protection, SQLite cache with stale-while-revalidate, `get_library_docs` tool, heading parser, `read_page` tool, and Streamable HTTP transport with `MCPSecurityMiddleware` are all implemented in `src/procontext/`. Phase 5 will add background registry updates, cache cleanup scheduling, CI/CD pipelines, Docker image, and `uvx` packaging.
-
-### Specification Documents (`docs/specs/`)
-
-All design decisions are captured here before implementation begins.
-
-1. **[Functional Specification](docs/specs/01-functional-spec.md)** — Problem statement, 3 MCP tools (`resolve_library`, `get_library_docs`, `read_page`), security model, design decisions
-2. **[Technical Specification](docs/specs/02-technical-spec.md)** — System architecture, data models, resolution algorithm, SQLite cache, heading parser, transports
-3. **[Implementation Guide](docs/specs/03-implementation-guide.md)** — Project structure, coding conventions, 6 implementation phases, testing strategy
-4. **[API Reference](docs/specs/04-api-reference.md)** — Formal MCP API: tool schemas, wire format examples, error codes, versioning policy
-5. **[Security Specification](docs/specs/05-security-spec.md)** — Threat model, trust boundaries, security controls, data handling, dependency management
-
-### Implementation Roadmap
-
-- ✅ **Phase 0**: Foundation — server skeleton, config, logging, errors, models, protocols, `AppState`
-- ✅ **Phase 1**: Registry & Resolution — `load_registry()`, `resolve_library` tool, fuzzy matching
-- ✅ **Phase 2**: Fetcher & Cache — `get_library_docs` tool, httpx fetcher with SSRF protection, SQLite cache with stale-while-revalidate
-- ✅ **Phase 3**: Page Reading & Parser — `read_page` tool, heading parser, section extraction
-- ✅ **Phase 4**: HTTP Transport — Streamable HTTP, `MCPSecurityMiddleware`, uvicorn
-- ⬜ **Phase 5**: Registry Updates & Polish — background updates, cache cleanup, CI/CD, Docker, `uvx` packaging
-
----
-
-## Platform Support
-
-ProContext runs on **Windows, macOS, and Linux**. All filesystem paths (config, cache, data) resolve to the correct platform-native locations automatically — no manual path configuration needed.
-
-| Platform | Config & data directory                    |
-| -------- | ------------------------------------------ |
-| Linux    | `~/.local/share/procontext`                |
-| macOS    | `~/Library/Application Support/procontext` |
-| Windows  | `%LOCALAPPDATA%\procontext`                |
-
----
-
-## Installation
-
-> 🚧 **Not yet packaged for end users** — `uvx` / pip install is coming in Phase 5. The server supports both **stdio** and **HTTP** transports.
-
-**For development / early testing:**
+**Recommended** - once published to PyPI:
 
 ```bash
-# Clone and install dependencies
-git clone https://github.com/procontexthq/procontext.git
-cd procontext
-uv sync
-
-# Run in stdio mode (launched by an MCP client)
-uv run procontext
-
-# Run in HTTP mode (remote/shared deployments)
-PROCONTEXT__SERVER__TRANSPORT=http uv run procontext
+uvx procontext
 ```
 
-**Wire it up in Claude Desktop** (`claude_desktop_config.json`):
+> Not yet on PyPI. Use the method below until then.
+
+**In the meantime** - clone and run:
+
+```bash
+git clone https://github.com/procontexthq/procontext.git
+cd procontext && uv sync
+```
+
+Add to your MCP client config:
 
 ```json
 {
@@ -225,72 +45,245 @@ PROCONTEXT__SERVER__TRANSPORT=http uv run procontext
 }
 ```
 
-Once published to PyPI (Phase 5), the install will be:
+---
+
+## How It Works
+
+ProContext exposes three MCP tools that work as a pipeline. The agent drives the navigation - no server-side search, no intent guessing.
+
+**Step 1 - Resolve the library**
+
+```
+resolve_library({ "query": "langchain>=0.2" })
+
+→ {
+    "library_id": "langchain",
+    "name": "LangChain",
+    "docs_url": "https://docs.langchain.com",
+    "matched_via": "package_name",
+    "relevance": 1.0
+  }
+```
+
+**Step 2 - Fetch the table of contents**
+
+```
+get_library_docs({ "library_id": "langchain" })
+
+→ {
+    "content": "# LangChain\n\n## Concepts\n- [Chat Models](https://...)\n- [Tools](https://...)\n...",
+    "cached": false,
+    "stale": false
+  }
+```
+
+**Step 3 - Read a specific page**
+
+```
+read_page({ "url": "https://docs.langchain.com/docs/concepts/chat_models.md", "limit": 200 })
+
+→ {
+    "headings": "1: # Chat Models\n45: ## Streaming\n89: ## Tool Calling\n...",
+    "total_lines": 312,
+    "content": "# Chat Models\n\nChat models are..."
+  }
+```
+
+The agent reads the TOC, identifies the pages it needs, and reads them directly - jumping to relevant sections via the heading map. ProContext fetches from known, pre-validated sources and caches the results for subsequent calls.
+
+---
+
+## The Problem
+
+AI coding agents hallucinate API details because their training data ages. A library ships a breaking change; the agent's weights don't reflect it; the generated code doesn't work.
+
+Existing approaches each have a ceiling:
+
+| Approach               | Examples       | Accuracy | Limitation                                                                 |
+| ---------------------- | -------------- | -------- | -------------------------------------------------------------------------- |
+| **Server-side search** | Context7       | 65–75%   | Server must interpret vague user intent; requires expensive query model    |
+| **Agent-side RAG**     | Custom setups  | 90%+     | Agent must discover and validate sources itself; brittle at scale          |
+| **ProContext**         | _This project_ | **90%+** | Agent navigates pre-validated, always-fresh sources; no discovery overhead |
+
+ProContext's approach: build a curated registry of known-good documentation sources at build time, then serve them on demand at runtime. The agent's LLM already knows what it's looking for - ProContext just gets it there reliably.
+
+---
+
+## Features
+
+**Registry-first resolution**
+Library lookups complete in under 10ms from an in-memory index built at startup. Fuzzy matching handles typos and pip-style specifiers (`langchain>=0.1`, `langchain[openai]`).
+
+**llms.txt native**
+Purpose-built for the [llms.txt standard](https://llmstxt.org) - the AI-optimized documentation format. Fetches tables of contents and individual pages on demand.
+
+**Efficient cache with stale-while-revalidate**
+First query: under 5 seconds (fetch + parse + cache). Repeat queries: under 100ms from SQLite. When cache expires, stale content is returned immediately while a background refresh runs - the agent never waits.
+
+**SSRF protection**
+The server only fetches from a domain allowlist derived from the registry at startup. Private IP ranges are blocked unconditionally, including on redirect hops.
+
+**HTTP transport**
+Implements MCP Streamable HTTP (spec 2025-11-25) for shared or remote deployments. `MCPSecurityMiddleware` enforces origin validation (DNS rebinding protection), optional bearer key authentication, and protocol version checks.
+
+**Cross-platform**
+Config, cache, and data paths resolve automatically on Windows, macOS, and Linux via `platformdirs` - no manual path configuration.
+
+---
+
+## Installation
+
+**Requirements**: Python 3.12+, [uv](https://docs.astral.sh/uv/)
 
 ```bash
-uvx procontext
+git clone https://github.com/procontexthq/procontext.git
+cd procontext
+uv sync
 ```
+
+### stdio mode (default)
+
+Your MCP client (Claude Code, Cursor, Windsurf) spawns and manages the server process automatically - you don't need to run anything manually. The command below is only needed if you want to test the server directly, for example to verify your setup:
+
+```bash
+uv run procontext
+```
+
+### HTTP mode
+
+For shared or remote deployments. Runs a persistent HTTP server on `/mcp`.
+
+Copy the example config, set `transport: http`, and run:
+
+```bash
+cp procontext.example.yaml procontext.yaml
+```
+
+```yaml
+# procontext.yaml
+server:
+  transport: http
+  host: "127.0.0.1"
+  port: 8080
+  auth_enabled: false # set true to require a bearer key
+cache:
+  ttl_hours: 24
+```
+
+```bash
+uv run procontext
+```
+
+Alternatively, settings can be passed directly as environment variables using the `PROCONTEXT__` prefix:
+
+```bash
+PROCONTEXT__SERVER__TRANSPORT=http \
+PROCONTEXT__SERVER__HOST=127.0.0.1 \
+PROCONTEXT__SERVER__PORT=8080 \
+uv run procontext
+```
+
+---
+
+## Integrations
+
+### Claude Code
+
+Add to `.claude/mcp_config.json` (project-level) or `~/.claude/mcp_config.json` (global):
+
+```json
+{
+  "mcpServers": {
+    "procontext": {
+      "command": "uv",
+      "args": ["run", "--project", "/path/to/procontext", "procontext"]
+    }
+  }
+}
+```
+
+### Claude Desktop
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "procontext": {
+      "command": "uv",
+      "args": ["run", "--project", "/path/to/procontext", "procontext"]
+    }
+  }
+}
+```
+
+### Codex / Cursor / Antigravity / Windsurf
+
+Add to your MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "procontext": {
+      "command": "uv",
+      "args": ["run", "--project", "/path/to/procontext", "procontext"]
+    }
+  }
+}
+```
+
+### HTTP mode (shared deployments)
+
+Point your MCP client at the server URL:
+
+```json
+{
+  "mcpServers": {
+    "procontext": {
+      "url": "http://your-server:8080/mcp"
+    }
+  }
+}
+```
+
+---
+
+## Platform Support
+
+All filesystem paths resolve automatically - no manual configuration needed.
+
+| Platform | Config & data directory                    |
+| -------- | ------------------------------------------ |
+| Linux    | `~/.local/share/procontext`                |
+| macOS    | `~/Library/Application Support/procontext` |
+| Windows  | `%LOCALAPPDATA%\procontext`                |
+
+---
+
+## Documentation
+
+Design decisions, architecture, and API reference are in [`docs/specs/`](docs/specs/).
 
 ---
 
 ## Contributing
 
-Contributions are welcome! See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup instructions, development workflow, coding conventions, and how to submit a pull request.
-
----
-
-## Technology Stack
-
-- **Language**: Python 3.12+
-- **Package Manager**: uv
-- **MCP SDK**: `mcp` (FastMCP)
-- **HTTP Client**: httpx (async, with SSRF protection)
-- **Database**: SQLite via aiosqlite
-- **Platform Paths**: platformdirs (cross-platform config/data directories)
-- **Settings**: pydantic-settings (YAML + env vars)
-- **Fuzzy Matching**: rapidfuzz (Phase 1)
-- **Logging**: structlog (structured JSON to stderr)
-- **Testing**: pytest + pytest-asyncio + respx
-- **Linting**: ruff
-- **Type Checking**: pyright
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, development workflow, coding conventions, and how to submit a pull request.
 
 ---
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0** - see the [LICENSE](LICENSE) file for details.
+GPL-3.0 - see [LICENSE](LICENSE) for details.
 
-**Why GPL-3.0?** We want ProContext to remain free and open-source forever. The GPL ensures that any modifications or derivatives must also be open-source, preventing proprietary forks.
-
----
-
-## Purpose & Vision
-
-ProContext was created to solve the accuracy problem in AI coding agents by providing them with reliable, up-to-date documentation access.
-
----
-
-## Acknowledgments
-
-- [Model Context Protocol (MCP)](https://modelcontextprotocol.io) by Anthropic
-- [llms.txt standard](https://llmstxt.org) for AI-optimized documentation
-- [llms-txt-hub](https://github.com/thedaviddias/llms-txt-hub) for curated llms.txt registry
-- [top-pypi-packages](https://hugovk.github.io/top-pypi-packages/) for popularity rankings
-
----
-
-## Links
-
-- **Specifications**: [`docs/specs/`](docs/specs/)
-- **Issues**: [GitHub Issues](https://github.com/procontexthq/procontext/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/procontexthq/procontext/discussions)
-- **MCP Documentation**: [modelcontextprotocol.io](https://modelcontextprotocol.io)
-- **llms.txt Standard**: [llmstxt.org](https://llmstxt.org)
+The GPL ensures that ProContext and any derivatives remain free and open-source.
 
 ---
 
 <div align="center">
 
 **Built with ❤️ for AI coding agents**
+
+[Specifications](docs/specs/) · [Issues](../../issues) · [Discussions](../../discussions) · [MCP](https://modelcontextprotocol.io) · [llms.txt](https://llmstxt.org)
 
 </div>
