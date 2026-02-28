@@ -36,6 +36,14 @@
   - [8.1 stdio Transport](#81-stdio-transport)
   - [8.2 HTTP Transport](#82-http-transport)
 - [9. Registry Updates](#9-registry-updates)
+  - [9.1 Registry Files](#91-registry-files)
+  - [9.2 Startup Sequence](#92-startup-sequence)
+  - [9.3 Two-URL Design](#93-two-url-design)
+  - [9.4 Outcome Classification](#94-outcome-classification)
+  - [9.5 Background Update Check](#95-background-update-check)
+  - [9.6 In-Memory Hot-Swap](#96-in-memory-hot-swap)
+  - [9.7 Atomic Persistence of Local Registry Pair](#97-atomic-persistence-of-local-registry-pair)
+  - [9.8 Scheduling Policy](#98-scheduling-policy)
 - [10. Configuration](#10-configuration)
 - [11. Logging](#11-logging)
 
@@ -939,20 +947,25 @@ def run_http_server(settings: Settings) -> None:
 
 ## 9. Registry Updates
 
-### Startup
+The registry update system keeps the in-memory library index fresh without interrupting request serving. It is designed around three principles:
 
-```
-1. Attempt to load <data_dir>/registry/known-libraries.json
-2. Attempt to load <data_dir>/registry/registry-state.json
-3. Validate local pair: both files parse and sha256(known-libraries.json) equals registry-state.json.checksum
-4. If either file is missing or validation fails → ignore local pair, load bundled snapshot (src/procontext/data/known-libraries.json), set local version to "unknown"
-5. Build in-memory indexes and SSRF allowlist from loaded data
-6. Spawn background task: _check_for_registry_update()
-```
+1. **Always start** — the server can always start even with no network access, using a bundled snapshot as a hard floor.
+2. **Cheap polling** — a tiny metadata file is fetched on each poll cycle; the full registry is only downloaded when its checksum changes.
+3. **Zero-downtime swap** — new registry data is applied to the live `AppState` atomically while in-flight requests continue using the previous data safely.
 
-### Local Registry State File
+---
 
-`registry-state.json` is stored alongside `known-libraries.json` at `<data_dir>/registry/`:
+### 9.1 Registry Files
+
+Three registry artefacts are involved:
+
+| Artefact | Location | Purpose |
+|---|---|---|
+| **Bundled snapshot** | `src/procontext/data/known-libraries.json` | Ships inside the package. The unconditional fallback — always present, always valid. |
+| **Local registry** | `<data_dir>/registry/known-libraries.json` | Downloaded and cached on disk. Used on subsequent startups to avoid a network fetch. |
+| **Local state file** | `<data_dir>/registry/registry-state.json` | Stores `version`, `sha256` checksum, and `updated_at` for the local registry. Treated as a consistency unit with the local registry. |
+
+`registry-state.json` format:
 
 ```json
 {
@@ -962,164 +975,147 @@ def run_http_server(settings: Settings) -> None:
 }
 ```
 
-Rules:
+The local registry pair (both files together) is the consistency unit. If either file is missing, cannot be parsed, or the checksum in the state file does not match `sha256(known-libraries.json)`, both files are discarded and the bundled snapshot is used instead.
 
-- `version` is the canonical local registry version used for remote comparison (`remote_version == local_version`)
-- Local disk files are treated as a consistency unit: if either file is missing/invalid or checksum validation fails, both are ignored and startup falls back to bundled snapshot (`local_version = "unknown"`)
-- On successful update, both `known-libraries.json` and `registry-state.json` are persisted atomically for next startup
+---
 
-### Atomic Persistence of Local Registry Pair
+### 9.2 Startup Sequence
 
-`save_registry_to_disk()` writes both files with crash-safe semantics:
+```
+1. Try to load local registry pair from <data_dir>/registry/
+      Both files must exist, parse, and pass checksum validation.
+      On success → local_version = registry-state.json.version
 
-```python
-def save_registry_to_disk(
-    *,
-    registry_bytes: bytes,
-    version: str,
-    checksum: str,
-    registry_path: Path,
-    state_path: Path,
-) -> None:
-    registry_path.parent.mkdir(parents=True, exist_ok=True)
+2. If local pair is missing or invalid →
+      Load bundled snapshot (src/procontext/data/known-libraries.json)
+      local_version = "unknown"
 
-    state_bytes = json.dumps(
-        {
-            "version": version,
-            "checksum": checksum,
-            "updated_at": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-        }
-    ).encode("utf-8")
+3. Build in-memory indexes (RegistryIndexes) and SSRF allowlist from loaded data.
+   Server is now ready to handle requests using this data.
 
-    registry_tmp = registry_path.with_suffix(registry_path.suffix + ".tmp")
-    state_tmp = state_path.with_suffix(state_path.suffix + ".tmp")
+4. If local_version == "unknown" →
+      Attempt a blocking first-run fetch (5s timeout).
+      On success → state is updated with fresh registry before first request is served.
+      On failure → log warning, continue serving from bundled snapshot.
 
-    try:
-        _write_bytes_fsync(registry_tmp, registry_bytes)
-        _write_bytes_fsync(state_tmp, state_bytes)
-
-        os.replace(registry_tmp, registry_path)
-        os.replace(state_tmp, state_path)
-        _fsync_directory(registry_path.parent)
-    finally:
-        for tmp in (registry_tmp, state_tmp):
-            with suppress(OSError):
-                tmp.unlink(missing_ok=True)
+5. Spawn background task: _run_registry_update_scheduler()
 ```
 
-Operational guarantees:
+**Why load the bundled snapshot before attempting the URL fetch?**
+`AppState` must be fully populated before the server starts accepting connections. Loading the bundled snapshot first guarantees the server is always ready to serve, regardless of network conditions. The blocking first-run fetch (step 4) then opportunistically replaces the bundled data with fresh data before the first request arrives — but it is best-effort, not a requirement.
 
-- A partially written destination file is never observed
-- If persistence fails before replace, previous valid pair remains intact
-- If persistence fails after replacing one file, startup checksum validation detects mismatch and falls back to bundled snapshot
+**`local_version = "unknown"` is the key signal.** It means "we have no previously downloaded registry" and triggers the blocking first-run fetch. Once any successful download is persisted, subsequent startups skip this path entirely and load from disk at full speed.
 
-### Background Update Check
+---
 
-```python
-RegistryUpdateOutcome = Literal["success", "transient_failure", "semantic_failure"]
+### 9.3 Two-URL Design
 
-async def check_for_registry_update(state: AppState) -> RegistryUpdateOutcome:
-    # 1. Fetch metadata (transient on network error or 5xx/408/429)
-    metadata_response = await _safe_get(state, state.settings.registry.metadata_url, timeout=10.0)
-    if metadata_response is None:
-        return "transient_failure"
-    if not metadata_response.is_success:
-        return _classify_http_failure(...)
+The update check uses two separate URLs:
 
-    # 2. Parse and validate metadata fields (semantic on invalid shape)
-    metadata = metadata_response.json()
-    remote_version, download_url, expected_checksum = ...  # validate or return "semantic_failure"
+- **`registry.metadata_url`** — a tiny JSON file (`~200 bytes`) containing the current `version`, `checksum`, and `download_url`. Fetched on every poll cycle (10s timeout).
+- **`registry.url`** — the full registry JSON (potentially hundreds of KB). Fetched only when the remote `version` differs from the local one (60s timeout).
 
-    # 3. Short-circuit if already up to date
-    if remote_version == state.registry_version:
-        return "success"
+This split means that on a typical poll cycle where the registry has not changed, only the small metadata file is fetched. The full registry download is triggered only when there is actually an update — reducing outbound traffic significantly in long-running HTTP deployments.
 
-    # 4. Download registry (transient on network error or 5xx/408/429)
-    registry_response = await _safe_get(state, download_url, timeout=60.0)
-    if registry_response is None:
-        return "transient_failure"
-
-    # 5. Checksum validation (semantic on mismatch)
-    actual_checksum = _sha256_prefixed(registry_response.content)
-    if actual_checksum != expected_checksum:
-        return "semantic_failure"
-
-    # 6. Parse registry entries (semantic on schema error)
-    new_entries = [RegistryEntry(**e) for e in registry_response.json()]
-
-    # 7. Rebuild indexes + allowlist and swap atomically.
-    # Python's GIL makes attribute assignment atomic, and frozenset/RegistryIndexes
-    # are immutable once built.  In-flight requests that already hold a reference to
-    # the previous allowlist continue using it for the duration of their request —
-    # this is correct behaviour, not a race condition.  New requests pick up the
-    # updated allowlist immediately after the assignment.
-    new_indexes = build_indexes(new_entries)
-    new_allowlist = build_allowlist(new_entries)
-    state.indexes, state.allowlist, state.registry_version = (
-        new_indexes, new_allowlist, remote_version,
-    )
-
-    # 8. Persist to disk (non-fatal on failure)
-    save_registry_to_disk(
-        registry_bytes=registry_response.content,
-        version=remote_version,
-        checksum=expected_checksum,
-        registry_path=state.registry_path,
-        state_path=state.registry_state_path,
-    )
-
-    return "success"
+```
+Poll cycle:
+  GET metadata_url → { version, checksum, download_url }
+       │
+       ├─ version == local_version  → return "success" (no download needed)
+       │
+       └─ version != local_version  → GET download_url
+                                           │
+                                           ├─ sha256(body) == checksum → apply update
+                                           └─ sha256(body) != checksum → return "semantic_failure"
 ```
 
-The scheduler (in `server.py`) calls `check_for_registry_update()` and uses the returned outcome to decide the next sleep interval. See Scheduling Policy below.
+---
 
-### Scheduling Policy (Hybrid)
+### 9.4 Outcome Classification
 
-Registry update checks use a hybrid scheduler:
+`check_for_registry_update()` returns one of three outcomes, which the scheduler uses to decide the next sleep interval:
 
-- Always run one check at startup (both stdio and HTTP)
-- In HTTP mode, after a successful check, schedule the next check at `SUCCESS_INTERVAL = 24h`
-- In HTTP mode, after a **transient failure** (network timeout/DNS/connection failures, upstream 5xx), schedule retry using exponential backoff with jitter:
-  - `INITIAL_BACKOFF = 60s`
-  - `MAX_BACKOFF = 3600s`
-  - `MAX_TRANSIENT_BACKOFF_ATTEMPTS = 8` (consecutive transient failures)
-  - `next_backoff = min(current_backoff * 2, MAX_BACKOFF)`
-  - jitter: random multiplier in `[0.8, 1.2]`
-- If consecutive transient failures reach `MAX_TRANSIENT_BACKOFF_ATTEMPTS`, reset the failure counter and backoff, then return to `SUCCESS_INTERVAL = 24h` cadence. This gives the next round a fresh set of fast-retry attempts.
-- In HTTP mode, after a **semantic failure** (invalid metadata fields, checksum mismatch, registry schema parse failure), do not use backoff; log and return to `SUCCESS_INTERVAL = 24h`
-- After a successful check, reset backoff state and return to 24h cadence
-- In stdio mode, no post-startup retries are scheduled because the process is typically short-lived
+| Outcome | Meaning | Examples |
+|---|---|---|
+| `"success"` | Registry is up to date or was successfully updated | Version match, clean download + checksum pass |
+| `"transient_failure"` | Recoverable infrastructure problem — retry with backoff | Network timeout, DNS failure, upstream 5xx/408/429 |
+| `"semantic_failure"` | Non-recoverable data problem — retrying immediately won't help | Invalid metadata shape, checksum mismatch, schema parse failure |
 
-Illustrative scheduler logic:
+Transient failures are retried aggressively with exponential backoff. Semantic failures skip backoff and return to the normal poll cadence — the assumption is that a malformed registry is a publisher-side bug that will be fixed before the next scheduled check.
 
-```python
-success_interval = 24 * 60 * 60
-initial_backoff = 60
-max_backoff = 60 * 60
-max_transient_backoff_attempts = 8
-backoff = initial_backoff
-consecutive_transient_failures = 0
+---
 
-while running_http_server:
-    outcome = await run_registry_update_cycle(state)  # "success" | "transient_failure" | "semantic_failure"
-    if outcome == "success":
-        consecutive_transient_failures = 0
-        backoff = initial_backoff
-        await sleep(success_interval)
-    elif outcome == "transient_failure":
-        consecutive_transient_failures += 1
-        if consecutive_transient_failures >= max_transient_backoff_attempts:
-            consecutive_transient_failures = 0
-            backoff = initial_backoff
-            await sleep(success_interval)
-            continue
-        delay = backoff * random.uniform(0.8, 1.2)
-        await sleep(delay)
-        backoff = min(backoff * 2, max_backoff)
-    else:  # semantic_failure
-        consecutive_transient_failures = 0
-        backoff = initial_backoff
-        await sleep(success_interval)
+### 9.5 Background Update Check
+
+`check_for_registry_update(state)` in `registry.py` follows these steps:
+
+1. Fetch `metadata_url` (10s timeout). Network error or 5xx/408/429 → `"transient_failure"`.
+2. Parse and validate metadata fields (`version`, `checksum`, `download_url`). Invalid shape → `"semantic_failure"`.
+3. Short-circuit if `remote_version == state.registry_version` → `"success"`.
+4. Fetch the full registry from `download_url` (60s timeout). Network error → `"transient_failure"`.
+5. Validate `sha256(body) == expected_checksum`. Mismatch → `"semantic_failure"`.
+6. Parse registry entries. Schema error → `"semantic_failure"`.
+7. Rebuild indexes and allowlist, swap atomically into `AppState` (see §9.6).
+8. Persist pair to disk (non-fatal on failure, see §9.7).
+9. Return `"success"`.
+
+---
+
+### 9.6 In-Memory Hot-Swap
+
+When a registry update is applied (step 7 above), three `AppState` attributes are replaced simultaneously:
+
+- `state.indexes` — the new `RegistryIndexes` (all lookup maps rebuilt from the new entries)
+- `state.allowlist` — new `frozenset[str]` built from the new registry entries + `extra_allowed_domains`
+- `state.registry_version` — updated to the remote version string
+
+**Why this is safe without a lock:**
+
+Both `RegistryIndexes` and `frozenset` are immutable once constructed. Python's GIL makes the combined attribute assignment effectively atomic at the interpreter level. Any request already in-flight that holds a reference to the old `state.allowlist` or `state.indexes` continues to work against those objects for the duration of that request — the objects themselves never change. New requests arriving after the assignment pick up the fresh data immediately.
+
+The allowlist is always reset to the registry baseline on each successful update. Any domains that were dynamically expanded at runtime (via `allowlist_depth` > 0) are not carried forward into the new allowlist — they will be re-accumulated as pages are fetched under the new registry. Domains stored in the `discovered_domains` cache column are restored at the next server restart via `load_discovered_domains()`.
+
+---
+
+### 9.7 Atomic Persistence of Local Registry Pair
+
+`save_registry_to_disk()` in `registry.py` writes both files with crash-safe semantics using write-to-temp-then-rename: each file is written and fsynced to a `.tmp` sibling, then renamed into place with `os.replace()`, followed by an fsync on the parent directory. Temp files are cleaned up in a `finally` block.
+
+Crash-safety guarantees:
+
+| Failure point | Effect on disk | Next startup behaviour |
+|---|---|---|
+| Crash during temp write | Destination files untouched | Load previous valid pair |
+| Crash after registry rename, before state rename | Registry updated, state stale | Checksum mismatch → fall back to bundled snapshot |
+| Crash after both renames | Both files updated | Load new pair normally |
+
+`_fsync_directory()` is a no-op on Windows (`sys.platform == "win32"` guard) since Windows does not support `fsync` on directory handles. The write-then-rename guarantee still holds; only the directory entry durability is weaker.
+
+---
+
+### 9.8 Scheduling Policy
+
+Registry update checks run differently depending on transport mode:
+
+**stdio mode** — checks once at startup and exits. The process is typically short-lived (one agent session), so a polling loop would be wasteful.
+
+**HTTP mode** — loops indefinitely. The poll interval after a successful check is controlled by `registry.poll_interval_hours` (default 24h, configurable). Transient failures are retried with exponential backoff; semantic failures return to the normal poll cadence without backoff.
+
+Backoff parameters (currently hardcoded, not configurable):
+- `INITIAL_BACKOFF = 60s`
+- `MAX_BACKOFF = 3600s`
+- `MAX_TRANSIENT_BACKOFF_ATTEMPTS = 8`
+- jitter: `backoff × random.uniform(0.8, 1.2)` — prevents thundering herd if multiple instances share the same registry URL
+
+If consecutive transient failures reach `MAX_TRANSIENT_BACKOFF_ATTEMPTS`, the circuit breaker fires: the failure counter and backoff are reset, and the scheduler sleeps for the full `poll_interval_hours` before trying again. This prevents the server from spending all its time on failed retries when the registry is persistently unreachable.
+
+```
+Outcome → sleep before next attempt
+─────────────────────────────────────────────────────────
+success                          poll_interval_hours × 3600
+semantic_failure                 poll_interval_hours × 3600
+transient (attempt < 8)          backoff × jitter  (then backoff doubles)
+transient (attempt = 8, reset)   poll_interval_hours × 3600
 ```
 
 ---
