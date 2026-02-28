@@ -143,6 +143,24 @@ async def _maybe_blocking_first_run_fetch(state: AppState) -> bool:
     return False
 
 
+async def _run_cache_cleanup_scheduler(state: AppState) -> None:
+    """Run cache cleanup at startup and (HTTP mode) on the configured interval."""
+    interval_hours = state.settings.cache.cleanup_interval_hours
+
+    # Both transports: run at startup, skipping if it ran recently.
+    if state.cache is not None:
+        await state.cache.cleanup_if_due(interval_hours)
+
+    if state.settings.server.transport != "http":
+        return
+
+    # HTTP long-running mode: repeat on the configured interval.
+    while True:
+        await asyncio.sleep(interval_hours * 3600)
+        if state.cache is not None:
+            await state.cache.cleanup_if_due(interval_hours)
+
+
 async def _run_registry_update_scheduler(
     state: AppState,
     *,
@@ -261,6 +279,7 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
     registry_update_task = asyncio.create_task(
         _run_registry_update_scheduler(state, skip_initial_check=first_run_attempted)
     )
+    cache_cleanup_task = asyncio.create_task(_run_cache_cleanup_scheduler(state))
 
     log.info(
         "server_started",
@@ -274,8 +293,11 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
         yield state
     finally:
         registry_update_task.cancel()
+        cache_cleanup_task.cancel()
         with suppress(asyncio.CancelledError):
             await registry_update_task
+        with suppress(asyncio.CancelledError):
+            await cache_cleanup_task
         await http_client.aclose()
         await db.close()
         log.info("server_stopping")

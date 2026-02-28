@@ -50,6 +50,13 @@ CREATE TABLE IF NOT EXISTS page_cache (
 _CREATE_TOC_INDEX = "CREATE INDEX IF NOT EXISTS idx_toc_expires ON toc_cache(expires_at)"
 _CREATE_PAGE_INDEX = "CREATE INDEX IF NOT EXISTS idx_page_expires ON page_cache(expires_at)"
 
+_CREATE_METADATA_TABLE = """
+CREATE TABLE IF NOT EXISTS server_metadata (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+)
+"""
+
 
 class Cache:
     """SQLite-backed documentation cache implementing CacheProtocol."""
@@ -65,6 +72,7 @@ class Cache:
         await self._db.execute(_CREATE_PAGE_TABLE)
         await self._db.execute(_CREATE_TOC_INDEX)
         await self._db.execute(_CREATE_PAGE_INDEX)
+        await self._db.execute(_CREATE_METADATA_TABLE)
         await self._db.commit()
 
     # ------------------------------------------------------------------
@@ -232,6 +240,37 @@ class Cache:
     # ------------------------------------------------------------------
     # Maintenance
     # ------------------------------------------------------------------
+
+    async def cleanup_if_due(self, interval_hours: int) -> None:
+        """Run cleanup only if interval_hours have elapsed since the last run.
+
+        Reads and writes ``last_cleanup_at`` from the ``server_metadata`` table.
+        Falls through to run cleanup if the metadata row is missing or unreadable.
+        Non-fatal on failure.
+        """
+        try:
+            cursor = await self._db.execute(
+                "SELECT value FROM server_metadata WHERE key = 'last_cleanup_at'"
+            )
+            row = await cursor.fetchone()
+            if row is not None:
+                last_run = datetime.fromisoformat(row[0])
+                if datetime.now(UTC) - last_run < timedelta(hours=interval_hours):
+                    log.debug("cache_cleanup_skipped", reason="not_due")
+                    return
+        except aiosqlite.Error:
+            log.warning("cache_metadata_read_error", exc_info=True)
+
+        await self.cleanup_expired()
+
+        try:
+            await self._db.execute(
+                "INSERT OR REPLACE INTO server_metadata (key, value) VALUES ('last_cleanup_at', ?)",
+                (datetime.now(UTC).isoformat(),),
+            )
+            await self._db.commit()
+        except aiosqlite.Error:
+            log.warning("cache_metadata_write_error", exc_info=True)
 
     async def cleanup_expired(self) -> None:
         """Delete entries expired more than 7 days ago. Non-fatal on failure."""
