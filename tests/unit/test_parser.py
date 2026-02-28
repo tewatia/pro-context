@@ -78,13 +78,7 @@ class TestCodeFenceSuppression:
         assert result == "1: # Before\n7: ## After"
 
     def test_multiple_code_blocks(self) -> None:
-        content = (
-            "# Heading 1\n"
-            "```\n# code\n```\n"
-            "## Heading 2\n"
-            "~~~\n# code\n~~~\n"
-            "### Heading 3"
-        )
+        content = "# Heading 1\n```\n# code\n```\n## Heading 2\n~~~\n# code\n~~~\n### Heading 3"
         result = parse_headings(content)
         assert result == "1: # Heading 1\n5: ## Heading 2\n9: ### Heading 3"
 
@@ -114,18 +108,18 @@ class TestLineNumbering:
 
     def test_complex_numbering(self) -> None:
         content = (
-            "# Title\n"        # line 1
-            "\n"               # line 2
-            "## Overview\n"    # line 3
-            "\n"               # line 4
-            "Some text.\n"     # line 5
-            "\n"               # line 6
-            "```python\n"      # line 7
-            "# comment\n"      # line 8
-            "```\n"            # line 9
-            "\n"               # line 10
-            "### Details\n"    # line 11
-            "More text."       # line 12
+            "# Title\n"  # line 1
+            "\n"  # line 2
+            "## Overview\n"  # line 3
+            "\n"  # line 4
+            "Some text.\n"  # line 5
+            "\n"  # line 6
+            "```python\n"  # line 7
+            "# comment\n"  # line 8
+            "```\n"  # line 9
+            "\n"  # line 10
+            "### Details\n"  # line 11
+            "More text."  # line 12
         )
         result = parse_headings(content)
         assert result == "1: # Title\n3: ## Overview\n11: ### Details"

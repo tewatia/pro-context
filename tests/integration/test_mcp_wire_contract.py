@@ -172,9 +172,7 @@ def test_resolve_library_wire_success(subprocess_env: dict[str, str]) -> None:
     assert payload["matches"][0]["library_id"] == "langchain"
 
 
-def test_read_page_wire_success_from_cache(
-    tmp_path: Path, subprocess_env: dict[str, str]
-) -> None:
+def test_read_page_wire_success_from_cache(tmp_path: Path, subprocess_env: dict[str, str]) -> None:
     url = "https://python.langchain.com/docs/concepts/cached.md"
     content = "# Title\n\n## Section\nLine A\nLine B"
     headings = "1: # Title\n3: ## Section"

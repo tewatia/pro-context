@@ -37,6 +37,8 @@ dev = [
     "respx>=0.21.0",
     "ruff>=0.11.0",
     "pyright>=1.1.400",
+    "pytest-cov>=7.0.0",
+    "pip-audit>=2.7.0,<3.0.0",
 ]
 
 [tool.pytest.ini_options]
