@@ -39,6 +39,7 @@ dev = [
     "pyright>=1.1.400",
     "pytest-cov>=7.0.0",
     "pip-audit>=2.7.0,<3.0.0",
+    "python-semantic-release>=9.0.0,<10.0.0",
 ]
 
 [tool.pytest.ini_options]
@@ -59,3 +60,18 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseS
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 include = ["src"]
+
+[tool.semantic_release]
+# Read and write the version from pyproject.toml
+version_toml = ["pyproject.toml:project.version"]
+tag_format = "v{version}"
+# [skip ci] prevents the release commit from re-triggering the CI workflow
+commit_message = "chore(release): v{version} [skip ci]"
+
+[tool.semantic_release.branches.main]
+match = "main"
+prerelease = false
+
+[tool.semantic_release.publish]
+# We publish to PyPI via uv in the workflow — no GitHub release artifacts needed
+upload_to_vcs_release = false
