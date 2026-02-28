@@ -1,10 +1,14 @@
-# CLAUDE.md
+# Development Guidelines
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This document contains critical information about working with this codebase. Follow these guidelines precisely.
 
 ## About the Project
 
 ProContext is an open-source MCP (Model Context Protocol) documentation server that provides AI coding agents with accurate, up-to-date library documentation to prevent hallucination of API details. Licensed under GPL-3.0.
+
+## Project Motivation
+
+Ankur (Author) has recently been working with Generative AI-based applications. Since this is a relatively new technology, all the libraries are relatively new as well and are updated frequently, which makes it difficult for coding agents to produce accurate code leveraging these libraries. Ankur's aim with this repo is to make coding agents more reliable by providing them with correct and up-to-date information.
 
 ## ⚠️ CRITICAL: Git Operations Policy
 
@@ -20,36 +24,15 @@ You must:
    - ❌ A commit for every tiny edit: noise, harder to understand history.
 5. Commit only the changes relevant to the current session. If there are other pending changes, ask the user whether you should commit them as well.
 
-## Project Motivation
+## Specifications
 
-Ankur (Author) has recently been working with Generative AI-based applications. Since this is a relatively new technology, all the libraries are relatively new as well and are updated frequently, which makes it difficult for coding agents to produce accurate code leveraging these libraries. Ankur's aim with this repo is to make coding agents more reliable by providing them with correct and up-to-date information.
-
-## Implementation Phases
-
-- ✅ **Phase 0**: Foundation — `pyproject.toml`, errors, models package, protocols, config, `AppState`, server skeleton, `RegistryIndexes` stub, `tools/` package
-- ✅ **Phase 1**: Registry & Resolution — `load_registry()`, `build_indexes()`, `resolve_library` tool, fuzzy matching (rapidfuzz)
-- ✅ **Phase 2**: Fetcher & Cache — `get_library_docs` tool, httpx fetcher with SSRF protection, SQLite cache (aiosqlite), stale-while-revalidate
-- ✅ **Phase 3**: Page Reading & Parser — `read_page` tool, heading parser, section extraction
-- ✅ **Phase 4**: HTTP Transport — Streamable HTTP (MCP spec 2025-11-25), `MCPSecurityMiddleware`, uvicorn
-- ⬜ **Phase 5**: Registry Updates & Polish — background update check, cache cleanup scheduler, CI/CD, Docker, `uvx` packaging
-
-**Current state**: Phase 4 is complete. Source code lives in `src/procontext/`. Phase 5 implementation is next.
-
-### Active Specifications (`docs/specs/`)
-
-These are the authoritative design documents for the current open-source version.
-
-- `docs/specs/01-functional-spec.md` — Problem statement, 3 MCP tools (`resolve_library`, `get_library_docs`, `read_page`), 1 resource, transport modes, registry, SQLite cache, security model, design decisions
-- `docs/specs/02-technical-spec.md` — System architecture, technology stack, data models (Pydantic), in-memory registry indexes, resolution algorithm, fetcher (httpx + SSRF), SQLite cache schema, heading parser, stdio + Streamable HTTP transport, registry update mechanism, configuration, logging
-- `docs/specs/03-implementation-guide.md` — Project structure, pyproject.toml, coding conventions (AppState injection, ProContextError pattern, logging guidance), 6 implementation phases with per-phase file tables, testing strategy (respx + in-memory SQLite), CI/CD
-- `docs/specs/04-api-reference.md` — Formal MCP API: tool definitions (JSON Schema + wire format examples), resource schema, full error code catalogue, stdio and HTTP transport reference, versioning policy
-- `docs/specs/05-security-spec.md` — Threat model (6 threats with severity and mitigation status), trust boundaries, security controls summary, known limitations, data handling, dependency vulnerability management, phase-gated security testing
-
-You are allowed to create new documents if the discussion warrants it. Update this section to link to any new documents you create.
+Spec documents are in `docs/specs/` — read the relevant one before making changes.
+These are the authoritative design documents for this repo.
+You are allowed to create new documents if the discussion warrants it.
 
 ## Overview of tech stack, architecture, coding conventions, configurations, commands and testing strategy
 
-_Expand this section as new phases are completed. Only add what Claude cannot infer from reading the code._
+_Only add what Claude cannot infer from reading the code._
 
 | Include in this section                              | Do NOT include                                     |
 | ---------------------------------------------------- | -------------------------------------------------- |
@@ -96,21 +79,11 @@ In stdio MCP mode, **stdout is owned by the MCP JSON-RPC stream**. Any writes to
 
 ### Platform-aware paths
 
-All filesystem defaults use `platformdirs` — never hardcode Unix paths like `~/.local/share/` or `~/.config/`. The defaults resolve to platform-appropriate locations automatically:
-
-| Platform | Config dir                                 | Data dir                                   |
-| -------- | ------------------------------------------ | ------------------------------------------ |
-| Linux    | `~/.config/procontext`                     | `~/.local/share/procontext`                |
-| macOS    | `~/Library/Application Support/procontext` | `~/Library/Application Support/procontext` |
-| Windows  | `C:\Users\<user>\AppData\Local\procontext` | `C:\Users\<user>\AppData\Local\procontext` |
-
-Config paths: `platformdirs.user_config_dir("procontext")` in `config.py`. Data paths: `platformdirs.user_data_dir("procontext")` in `config.py`. Registry paths derive from the data dir via `server.py:_registry_paths()`.
-
-`_fsync_directory()` in `registry.py` is a no-op on Windows (`sys.platform == "win32"` guard) since Windows does not support `fsync` on directory handles.
+All filesystem defaults use `platformdirs` — never hardcode Unix paths like `~/.local/share/` or `~/.config/`. Use `platformdirs.user_config_dir("procontext")` in `config.py` and `platformdirs.user_data_dir("procontext")` for data. Registry paths derive from the data dir via `server.py:_registry_paths()`.
 
 ### Forward references and TYPE_CHECKING
 
-All modules use `from __future__ import annotations`. Imports only needed for type annotations go inside `if TYPE_CHECKING:` blocks. This allows circular-free imports and lets Phase 0 reference types from Phase 1+ modules that don't fully exist yet.
+All modules use `from __future__ import annotations`. Imports only needed for type annotations go inside `if TYPE_CHECKING:` blocks.
 
 ### Type checker
 
@@ -121,8 +94,6 @@ This project uses **pyright** (not mypy). Run `uv run pyright src/` to check. St
 `MCPSecurityMiddleware` in `server.py` is a **pure ASGI middleware** (not `BaseHTTPMiddleware`). This is intentional: `BaseHTTPMiddleware` buffers the full response body before passing it along, which silently breaks SSE streaming. Never switch it to `BaseHTTPMiddleware`.
 
 The middleware enforces three checks in order: bearer auth → origin validation → protocol version. The ASGI `__call__` only intercepts `scope["type"] == "http"`; `lifespan` and `websocket` scopes pass through unconditionally.
-
-Bearer key behaviour: if `auth_enabled=true` and `auth_key` is empty, a key is auto-generated with `secrets.token_urlsafe(32)` and logged to stderr at `warning` level. The key is **not persisted** — a new key is generated on every server restart. MCP clients read it from server startup output.
 
 ## Coding Guidelines
 
