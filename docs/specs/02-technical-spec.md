@@ -37,13 +37,14 @@
   - [8.2 HTTP Transport](#82-http-transport)
 - [9. Registry Updates](#9-registry-updates)
   - [9.1 Registry Files](#91-registry-files)
-  - [9.2 Startup Sequence](#92-startup-sequence)
-  - [9.3 Two-URL Design](#93-two-url-design)
-  - [9.4 Outcome Classification](#94-outcome-classification)
-  - [9.5 Background Update Check](#95-background-update-check)
-  - [9.6 In-Memory Hot-Swap](#96-in-memory-hot-swap)
-  - [9.7 Atomic Persistence of Local Registry Pair](#97-atomic-persistence-of-local-registry-pair)
-  - [9.8 Scheduling Policy](#98-scheduling-policy)
+  - [9.2 procontext setup](#92-procontext-setup)
+  - [9.3 Startup Sequence](#93-startup-sequence)
+  - [9.4 Two-URL Design](#94-two-url-design)
+  - [9.5 Outcome Classification](#95-outcome-classification)
+  - [9.6 Background Update Check](#96-background-update-check)
+  - [9.7 In-Memory Hot-Swap](#97-in-memory-hot-swap)
+  - [9.8 Atomic Persistence of Local Registry Pair](#98-atomic-persistence-of-local-registry-pair)
+  - [9.9 Scheduling Policy](#99-scheduling-policy)
 - [10. Configuration](#10-configuration)
 - [11. Logging](#11-logging)
 
@@ -949,7 +950,7 @@ def run_http_server(settings: Settings) -> None:
 
 The registry update system keeps the in-memory library index fresh without interrupting request serving. It is designed around three principles:
 
-1. **Always start** — the server can always start even with no network access, using a bundled snapshot as a hard floor.
+1. **Explicit initialisation** — the server requires a local registry on disk. Run `procontext setup` once to download it; the server refuses to start without it.
 2. **Cheap polling** — a tiny metadata file is fetched on each poll cycle; the full registry is only downloaded when its checksum changes.
 3. **Zero-downtime swap** — new registry data is applied to the live `AppState` atomically while in-flight requests continue using the previous data safely.
 
@@ -957,13 +958,14 @@ The registry update system keeps the in-memory library index fresh without inter
 
 ### 9.1 Registry Files
 
-Three registry artefacts are involved:
+Two registry artefacts live on disk:
 
 | Artefact | Location | Purpose |
 |---|---|---|
-| **Bundled snapshot** | `src/procontext/data/known-libraries.json` | Ships inside the package. The unconditional fallback — always present, always valid. |
-| **Local registry** | `<data_dir>/registry/known-libraries.json` | Downloaded and cached on disk. Used on subsequent startups to avoid a network fetch. |
-| **Local state file** | `<data_dir>/registry/registry-state.json` | Stores `version`, `sha256` checksum, and `updated_at` for the local registry. Treated as a consistency unit with the local registry. |
+| **Local registry** | `<data_dir>/registry/known-libraries.json` | Downloaded by `procontext setup` and updated by the background scheduler. |
+| **Local state file** | `<data_dir>/registry/registry-state.json` | Stores `version`, `sha256` checksum, and `updated_at` for the local registry. |
+
+`<data_dir>` defaults to `platformdirs.user_data_dir("procontext")` and can be overridden via `PROCONTEXT__DATA_DIR`.
 
 `registry-state.json` format:
 
@@ -975,47 +977,59 @@ Three registry artefacts are involved:
 }
 ```
 
-The local registry pair (both files together) is the consistency unit. If either file is missing, cannot be parsed, or the checksum in the state file does not match `sha256(known-libraries.json)`, both files are discarded and the bundled snapshot is used instead.
+The local registry pair (both files together) is the consistency unit. If either file is missing, cannot be parsed, or the checksum in the state file does not match `sha256(known-libraries.json)`, the pair is considered invalid and the server treats it as if no registry exists.
 
 ---
 
-### 9.2 Startup Sequence
+### 9.2 `procontext setup`
+
+`procontext setup` is a one-time CLI command that must be run before starting the server for the first time:
+
+```
+procontext setup
+# or
+uvx procontext setup
+```
+
+It fetches the registry metadata, downloads the full registry, validates the checksum, and saves the local registry pair to `<data_dir>/registry/`. Exits with a clear error if the fetch fails.
+
+`setup` uses the same split HTTP timeout as all registry fetches: **5s to connect** (fail fast if unreachable), **5 minutes to read** (patient once the transfer has started).
+
+---
+
+### 9.3 Startup Sequence
 
 ```
 1. Try to load local registry pair from <data_dir>/registry/
       Both files must exist, parse, and pass checksum validation.
-      On success → local_version = registry-state.json.version
+      On success → proceed to step 3.
 
 2. If local pair is missing or invalid →
-      Load bundled snapshot (src/procontext/data/known-libraries.json)
-      local_version = "unknown"
+      Attempt a blocking auto-setup (same as procontext setup).
+        On success → load the newly saved pair, set auto_setup_ran = True, proceed to step 3.
+        On failure → exit with:
+          "Registry not initialised. Run 'procontext setup' to download the registry."
 
 3. Build in-memory indexes (RegistryIndexes) and SSRF allowlist from loaded data.
-   Server is now ready to handle requests using this data.
+   Server is now ready to handle requests.
 
-4. If local_version == "unknown" →
-      Attempt a blocking first-run fetch (5s timeout).
-      On success → state is updated with fresh registry before first request is served.
-      On failure → log warning, continue serving from bundled snapshot.
-
-5. Spawn background task: _run_registry_update_scheduler()
+4. Spawn background task: _run_registry_update_scheduler(skip_initial_check=auto_setup_ran)
 ```
 
-**Why load the bundled snapshot before attempting the URL fetch?**
-`AppState` must be fully populated before the server starts accepting connections. Loading the bundled snapshot first guarantees the server is always ready to serve, regardless of network conditions. The blocking first-run fetch (step 4) then opportunistically replaces the bundled data with fresh data before the first request arrives — but it is best-effort, not a requirement.
-
-**`local_version = "unknown"` is the key signal.** It means "we have no previously downloaded registry" and triggers the blocking first-run fetch. Once any successful download is persisted, subsequent startups skip this path entirely and load from disk at full speed.
+The auto-setup in step 2 makes the server self-healing on first run: if a user forgets to run `procontext setup`, a direct invocation will attempt to initialise the registry automatically. If the network is unavailable, the server exits with an actionable error rather than starting with no data.
 
 ---
 
-### 9.3 Two-URL Design
+### 9.4 Two-URL Design
 
 The update check uses two separate URLs:
 
-- **`registry.metadata_url`** — a tiny JSON file (`~200 bytes`) containing the current `version`, `checksum`, and `download_url`. Fetched on every poll cycle (10s timeout).
-- **`registry.url`** — the full registry JSON (potentially hundreds of KB). Fetched only when the remote `version` differs from the local one (60s timeout).
+- **`registry.metadata_url`** — a tiny JSON file (`~200 bytes`) containing the current `version`, `checksum`, and `download_url`. Fetched on every poll cycle.
+- **`registry.url`** — the full registry JSON (potentially hundreds of KB). Fetched only when the remote `version` differs from the local one.
 
 This split means that on a typical poll cycle where the registry has not changed, only the small metadata file is fetched. The full registry download is triggered only when there is actually an update — reducing outbound traffic significantly in long-running HTTP deployments.
+
+All registry HTTP requests use a **split timeout**: 5s to connect (fail fast if unreachable), 5 minutes to read (patient once the transfer has started). This avoids cutting off large downloads on slow networks while still failing quickly when the registry host is unreachable.
 
 ```
 Poll cycle:
@@ -1031,7 +1045,7 @@ Poll cycle:
 
 ---
 
-### 9.4 Outcome Classification
+### 9.5 Outcome Classification
 
 `check_for_registry_update()` returns one of three outcomes, which the scheduler uses to decide the next sleep interval:
 
@@ -1045,23 +1059,23 @@ Transient failures are retried aggressively with exponential backoff. Semantic f
 
 ---
 
-### 9.5 Background Update Check
+### 9.6 Background Update Check
 
 `check_for_registry_update(state)` in `registry.py` follows these steps:
 
-1. Fetch `metadata_url` (10s timeout). Network error or 5xx/408/429 → `"transient_failure"`.
+1. Fetch `metadata_url`. Network error or 5xx/408/429 → `"transient_failure"`.
 2. Parse and validate metadata fields (`version`, `checksum`, `download_url`). Invalid shape → `"semantic_failure"`.
 3. Short-circuit if `remote_version == state.registry_version` → `"success"`.
-4. Fetch the full registry from `download_url` (60s timeout). Network error → `"transient_failure"`.
+4. Fetch the full registry from `download_url`. Network error → `"transient_failure"`.
 5. Validate `sha256(body) == expected_checksum`. Mismatch → `"semantic_failure"`.
 6. Parse registry entries. Schema error → `"semantic_failure"`.
-7. Rebuild indexes and allowlist, swap atomically into `AppState` (see §9.6).
-8. Persist pair to disk (non-fatal on failure, see §9.7).
+7. Rebuild indexes and allowlist, swap atomically into `AppState` (see §9.7).
+8. Persist pair to disk (non-fatal on failure, see §9.8).
 9. Return `"success"`.
 
 ---
 
-### 9.6 In-Memory Hot-Swap
+### 9.7 In-Memory Hot-Swap
 
 When a registry update is applied (step 7 above), three `AppState` attributes are replaced simultaneously:
 
@@ -1077,7 +1091,7 @@ The allowlist is always reset to the registry baseline on each successful update
 
 ---
 
-### 9.7 Atomic Persistence of Local Registry Pair
+### 9.8 Atomic Persistence of Local Registry Pair
 
 `save_registry_to_disk()` in `registry.py` writes both files with crash-safe semantics using write-to-temp-then-rename: each file is written and fsynced to a `.tmp` sibling, then renamed into place with `os.replace()`, followed by an fsync on the parent directory. Temp files are cleaned up in a `finally` block.
 
@@ -1086,20 +1100,22 @@ Crash-safety guarantees:
 | Failure point | Effect on disk | Next startup behaviour |
 |---|---|---|
 | Crash during temp write | Destination files untouched | Load previous valid pair |
-| Crash after registry rename, before state rename | Registry updated, state stale | Checksum mismatch → fall back to bundled snapshot |
+| Crash after registry rename, before state rename | Registry updated, state stale | Checksum mismatch → auto-setup or exit with error |
 | Crash after both renames | Both files updated | Load new pair normally |
 
 `_fsync_directory()` is a no-op on Windows (`sys.platform == "win32"` guard) since Windows does not support `fsync` on directory handles. The write-then-rename guarantee still holds; only the directory entry durability is weaker.
 
 ---
 
-### 9.8 Scheduling Policy
+### 9.9 Scheduling Policy
 
 Registry update checks run differently depending on transport mode:
 
-**stdio mode** — checks once at startup and exits. The process is typically short-lived (one agent session), so a polling loop would be wasteful.
+**stdio mode** — checks once at startup (unless `skip_initial_check=True`) and exits. The process is typically short-lived (one agent session), so a polling loop would be wasteful.
 
-**HTTP mode** — loops indefinitely. The poll interval after a successful check is controlled by `registry.poll_interval_hours` (default 24h, configurable). Transient failures are retried with exponential backoff; semantic failures return to the normal poll cadence without backoff.
+**HTTP mode** — loops indefinitely. If `skip_initial_check=True`, sleeps for `poll_interval_hours` before the first check. The poll interval after a successful check is controlled by `registry.poll_interval_hours` (default 24h, configurable). Transient failures are retried with exponential backoff; semantic failures return to the normal poll cadence without backoff.
+
+`skip_initial_check=True` is set when the auto-setup ran successfully at startup — the registry was just downloaded, so there is no value in immediately checking again.
 
 Backoff parameters (currently hardcoded, not configurable):
 - `INITIAL_BACKOFF = 60s`
@@ -1107,7 +1123,7 @@ Backoff parameters (currently hardcoded, not configurable):
 - `MAX_TRANSIENT_BACKOFF_ATTEMPTS = 8`
 - jitter: `backoff × random.uniform(0.8, 1.2)` — prevents thundering herd if multiple instances share the same registry URL
 
-If consecutive transient failures reach `MAX_TRANSIENT_BACKOFF_ATTEMPTS`, the circuit breaker fires: the failure counter and backoff are reset, and the scheduler sleeps for the full `poll_interval_hours` before trying again. This prevents the server from spending all its time on failed retries when the registry is persistently unreachable.
+If consecutive transient failures reach `MAX_TRANSIENT_BACKOFF_ATTEMPTS`, the circuit breaker fires: the failure counter and backoff are reset, and the scheduler sleeps for the full `poll_interval_hours` before trying again.
 
 ```
 Outcome → sleep before next attempt
@@ -1125,6 +1141,8 @@ transient (attempt = 8, reset)   poll_interval_hours × 3600
 Configuration is loaded from `procontext.yaml` (searched in current directory, then the platform config directory via `platformdirs.user_config_dir("procontext")`). All values have defaults — the config file is optional.
 
 ```yaml
+data_dir: ""  # default: platformdirs.user_data_dir("procontext"); override via PROCONTEXT__DATA_DIR
+
 server:
   transport: stdio # stdio | http
   host: "0.0.0.0" # HTTP mode only

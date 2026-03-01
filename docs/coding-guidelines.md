@@ -191,7 +191,7 @@ Zero dependencies is ideal. When that is not practical, justify every runtime de
 
 When you inline a dependency, note the version and license in source comments. Do not add utility packages without considering the downstream implications.
 
-### 22. Additional signals:
+## Additional guidelines:
 
 1. **Type support quality** — not just "has types" but whether generics are useful and errors are typed.
 2. **Changelog quality** — document breaking changes and provide migration guides.
