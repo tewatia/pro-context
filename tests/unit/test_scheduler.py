@@ -1,7 +1,7 @@
 """Unit tests for the registry update scheduler in schedulers.py.
 
 Tests the scheduling loop logic by mocking check_for_registry_update and
-asyncio.sleep. Each test controls a sequence of outcomes and verifies the
+anyio.sleep. Each test controls a sequence of outcomes and verifies the
 resulting sleep durations and loop behavior.
 """
 
@@ -100,7 +100,7 @@ class TestSchedulerHttpMode:
 
         with (
             patch("procontext.schedulers.check_for_registry_update", mock_check),
-            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("anyio.sleep", side_effect=fake_sleep),
             pytest.raises(asyncio.CancelledError),
         ):
             await run_registry_update_scheduler(state)
@@ -119,7 +119,7 @@ class TestSchedulerHttpMode:
 
         with (
             patch("procontext.schedulers.check_for_registry_update", mock_check),
-            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("anyio.sleep", side_effect=fake_sleep),
             pytest.raises(asyncio.CancelledError),
         ):
             await run_registry_update_scheduler(state)
@@ -139,7 +139,7 @@ class TestSchedulerHttpMode:
 
         with (
             patch("procontext.schedulers.check_for_registry_update", mock_check),
-            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("anyio.sleep", side_effect=fake_sleep),
             patch(
                 "procontext.schedulers._jittered_delay",
                 side_effect=lambda seconds: float(seconds),
@@ -165,7 +165,7 @@ class TestSchedulerHttpMode:
 
         with (
             patch("procontext.schedulers.check_for_registry_update", mock_check),
-            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("anyio.sleep", side_effect=fake_sleep),
             patch(
                 "procontext.schedulers._jittered_delay",
                 side_effect=lambda seconds: float(seconds),
@@ -192,7 +192,7 @@ class TestSchedulerHttpMode:
 
         with (
             patch("procontext.schedulers.check_for_registry_update", mock_check),
-            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("anyio.sleep", side_effect=fake_sleep),
             patch(
                 "procontext.schedulers._jittered_delay",
                 side_effect=lambda seconds: float(seconds),
@@ -219,7 +219,7 @@ class TestSchedulerHttpMode:
 
         with (
             patch("procontext.schedulers.check_for_registry_update", mock_check),
-            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("anyio.sleep", side_effect=fake_sleep),
             patch(
                 "procontext.schedulers._jittered_delay",
                 side_effect=lambda seconds: float(seconds),
@@ -245,7 +245,7 @@ class TestSchedulerHttpMode:
 
         with (
             patch("procontext.schedulers.check_for_registry_update", mock_check),
-            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("anyio.sleep", side_effect=fake_sleep),
             patch(
                 "procontext.schedulers._jittered_delay",
                 side_effect=lambda seconds: float(seconds),
@@ -277,7 +277,7 @@ class TestSchedulerHttpMode:
 
         with (
             patch("procontext.schedulers.check_for_registry_update", mock_check),
-            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("anyio.sleep", side_effect=fake_sleep),
             pytest.raises(asyncio.CancelledError),
         ):
             await run_registry_update_scheduler(state, skip_initial_check=True)
@@ -301,7 +301,7 @@ class TestSchedulerHttpMode:
 
         with (
             patch("procontext.schedulers.check_for_registry_update", mock_check),
-            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("anyio.sleep", side_effect=fake_sleep),
             pytest.raises(asyncio.CancelledError),
         ):
             await run_registry_update_scheduler(state)
@@ -349,7 +349,7 @@ class TestCacheCleanupScheduler:
                 raise asyncio.CancelledError
 
         with (
-            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("anyio.sleep", side_effect=fake_sleep),
             pytest.raises(asyncio.CancelledError),
         ):
             await run_cache_cleanup_scheduler(state)
@@ -358,7 +358,7 @@ class TestCacheCleanupScheduler:
         assert mock_cache.cleanup_if_due.await_count == 2
 
     async def test_http_sleeps_for_configured_interval(self) -> None:
-        """HTTP mode: asyncio.sleep receives the configured interval in seconds."""
+        """HTTP mode: anyio.sleep receives the configured interval in seconds."""
         state = _make_state(transport="http")
         state.cache = AsyncMock()
         sleep_durations: list[float] = []
@@ -368,7 +368,7 @@ class TestCacheCleanupScheduler:
             raise asyncio.CancelledError
 
         with (
-            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("anyio.sleep", side_effect=fake_sleep),
             pytest.raises(asyncio.CancelledError),
         ):
             await run_cache_cleanup_scheduler(state)

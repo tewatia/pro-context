@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import random
 from typing import TYPE_CHECKING
 
+import anyio
 import structlog
 
 from procontext.registry import (
@@ -39,7 +39,7 @@ async def run_cache_cleanup_scheduler(state: AppState) -> None:
 
     # HTTP long-running mode: repeat on the configured interval.
     while True:
-        await asyncio.sleep(interval_hours * 3600)
+        await anyio.sleep(interval_hours * 3600)
         if state.cache is not None:
             await state.cache.cleanup_if_due(interval_hours)
 
@@ -66,7 +66,7 @@ async def run_registry_update_scheduler(
     consecutive_transient_failures = 0
 
     if skip_initial_check:
-        await asyncio.sleep(state.settings.registry.poll_interval_hours * 3600)
+        await anyio.sleep(state.settings.registry.poll_interval_hours * 3600)
 
     while True:
         try:
@@ -80,7 +80,7 @@ async def run_registry_update_scheduler(
         if outcome == "success":
             consecutive_transient_failures = 0
             backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
-            await asyncio.sleep(poll_interval_seconds)
+            await anyio.sleep(poll_interval_seconds)
             continue
 
         if outcome == "transient_failure":
@@ -93,14 +93,14 @@ async def run_registry_update_scheduler(
                 )
                 consecutive_transient_failures = 0
                 backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
-                await asyncio.sleep(poll_interval_seconds)
+                await anyio.sleep(poll_interval_seconds)
                 continue
 
-            await asyncio.sleep(_jittered_delay(backoff_seconds))
+            await anyio.sleep(_jittered_delay(backoff_seconds))
             backoff_seconds = min(backoff_seconds * 2, REGISTRY_MAX_BACKOFF_SECONDS)
             continue
 
         # semantic failure
         consecutive_transient_failures = 0
         backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
-        await asyncio.sleep(poll_interval_seconds)
+        await anyio.sleep(poll_interval_seconds)

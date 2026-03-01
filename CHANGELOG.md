@@ -29,6 +29,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bundled registry snapshot removed** — the server no longer ships with an
   embedded registry. Use `procontext setup` to initialise the registry before
   first use (or let the auto-setup fallback handle it on the first run).
+- **HTTP requests use split connect/read timeouts** — network requests now apply
+  separate connect and read timeouts instead of a single wall-clock timeout,
+  giving more predictable behaviour on slow or unreliable connections.
+
+### Fixed
+
+- **Config typos now fail loudly at startup** — unknown fields in
+  `procontext.yaml` are rejected with a clear, human-readable error message
+  rather than being silently ignored.
+
+### Security
+
+- **HTTP server binds to `127.0.0.1` by default** — `server.host` has changed
+  from `0.0.0.0` to `127.0.0.1`. The server no longer listens on all network
+  interfaces unless explicitly configured. Users who need network-wide access
+  must set `server.host: 0.0.0.0` in `procontext.yaml` or via
+  `PROCONTEXT__SERVER__HOST=0.0.0.0`.
+- **SLSA provenance attestation on releases** — release artifacts are now signed
+  with SLSA provenance attestations, enabling build provenance verification.
 
 ## [0.1.0] - 2026-02-28
 

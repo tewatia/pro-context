@@ -41,7 +41,6 @@ def _client(app: ASGIApp) -> httpx.AsyncClient:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_auth_disabled_allows_any_request() -> None:
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
     async with _client(app) as client:
@@ -49,7 +48,6 @@ async def test_auth_disabled_allows_any_request() -> None:
     assert response.status_code == 200
 
 
-@pytest.mark.asyncio
 async def test_auth_disabled_allows_request_with_auth_header() -> None:
     """Even if a client sends a bearer token, it is ignored when auth is off."""
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
@@ -63,7 +61,6 @@ async def test_auth_disabled_allows_request_with_auth_header() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_auth_enabled_correct_key_passes() -> None:
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=True, auth_key="secret-key")
     async with _client(app) as client:
@@ -71,7 +68,6 @@ async def test_auth_enabled_correct_key_passes() -> None:
     assert response.status_code == 200
 
 
-@pytest.mark.asyncio
 async def test_auth_enabled_wrong_key_returns_401() -> None:
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=True, auth_key="secret-key")
     async with _client(app) as client:
@@ -79,7 +75,6 @@ async def test_auth_enabled_wrong_key_returns_401() -> None:
     assert response.status_code == 401
 
 
-@pytest.mark.asyncio
 async def test_auth_enabled_missing_header_returns_401() -> None:
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=True, auth_key="secret-key")
     async with _client(app) as client:
@@ -87,7 +82,6 @@ async def test_auth_enabled_missing_header_returns_401() -> None:
     assert response.status_code == 401
 
 
-@pytest.mark.asyncio
 async def test_auth_enabled_malformed_header_returns_401() -> None:
     """Header present but not in 'Bearer <key>' format."""
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=True, auth_key="secret-key")
@@ -112,7 +106,6 @@ async def test_auth_enabled_malformed_header_returns_401() -> None:
         "http://127.0.0.1:3000",
     ],
 )
-@pytest.mark.asyncio
 async def test_origin_localhost_allowed(origin: str) -> None:
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
     async with _client(app) as client:
@@ -129,7 +122,6 @@ async def test_origin_localhost_allowed(origin: str) -> None:
         "http://0.0.0.0",
     ],
 )
-@pytest.mark.asyncio
 async def test_origin_external_blocked(origin: str) -> None:
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
     async with _client(app) as client:
@@ -137,7 +129,6 @@ async def test_origin_external_blocked(origin: str) -> None:
     assert response.status_code == 403
 
 
-@pytest.mark.asyncio
 async def test_no_origin_header_allowed() -> None:
     """CLI tools and non-browser clients don't send Origin — must be allowed."""
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
@@ -152,7 +143,6 @@ async def test_no_origin_header_allowed() -> None:
 
 
 @pytest.mark.parametrize("version", sorted(SUPPORTED_PROTOCOL_VERSIONS))
-@pytest.mark.asyncio
 async def test_known_protocol_version_allowed(version: str) -> None:
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
     async with _client(app) as client:
@@ -160,7 +150,6 @@ async def test_known_protocol_version_allowed(version: str) -> None:
     assert response.status_code == 200
 
 
-@pytest.mark.asyncio
 async def test_unknown_protocol_version_blocked() -> None:
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
     async with _client(app) as client:
@@ -168,7 +157,6 @@ async def test_unknown_protocol_version_blocked() -> None:
     assert response.status_code == 400
 
 
-@pytest.mark.asyncio
 async def test_absent_protocol_version_allowed() -> None:
     """Clients that omit the header are not rejected."""
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
@@ -182,7 +170,6 @@ async def test_absent_protocol_version_allowed() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_auth_checked_before_origin() -> None:
     """With auth enabled, a bad key returns 401 even if origin would be forbidden."""
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=True, auth_key="key")

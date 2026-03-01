@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import httpx
-import pytest
 
 from procontext.config import Settings
 from procontext.fetcher import build_allowlist
@@ -140,7 +139,6 @@ def test_save_registry_to_disk_writes_registry_pair(tmp_path: Path) -> None:
     assert "last_checked_at" in state_data
 
 
-@pytest.mark.asyncio
 async def test_check_for_registry_update_success_updates_state(
     tmp_path: Path,
     indexes,
@@ -189,7 +187,6 @@ async def test_check_for_registry_update_success_updates_state(
     assert state.registry_state_path is not None and state.registry_state_path.is_file()
 
 
-@pytest.mark.asyncio
 async def test_check_for_registry_update_transient_on_metadata_5xx(
     tmp_path: Path,
     indexes,
@@ -212,7 +209,6 @@ async def test_check_for_registry_update_transient_on_metadata_5xx(
     assert state.registry_version == "unknown"
 
 
-@pytest.mark.asyncio
 async def test_check_for_registry_update_semantic_on_checksum_mismatch(
     tmp_path: Path,
     indexes,
@@ -306,7 +302,6 @@ class TestFetchRegistryForSetup:
     tested here.
     """
 
-    @pytest.mark.asyncio
     async def test_success_downloads_and_persists(self, tmp_path: Path) -> None:
         """Happy path: valid metadata + registry → files written, returns True."""
         entries = [
@@ -350,7 +345,6 @@ class TestFetchRegistryForSetup:
         assert state_data["version"] == "2026-03-01"
         assert state_data["checksum"] == checksum
 
-    @pytest.mark.asyncio
     async def test_transient_failure_returns_false(self, tmp_path: Path) -> None:
         """503 on metadata fetch → transient failure → returns False, no files written."""
 
@@ -372,7 +366,6 @@ class TestFetchRegistryForSetup:
         assert not registry_path.exists()
         assert not state_path.exists()
 
-    @pytest.mark.asyncio
     async def test_checksum_mismatch_returns_false(self, tmp_path: Path) -> None:
         """Metadata checksum doesn't match registry body → returns False, no files written."""
         entries = [{"id": "lib", "name": "Lib", "llms_txt_url": "https://docs.lib.dev/llms.txt"}]
@@ -407,7 +400,6 @@ class TestFetchRegistryForSetup:
         assert not registry_path.exists()
         assert not state_path.exists()
 
-    @pytest.mark.asyncio
     async def test_persist_failure_returns_false(self, tmp_path: Path) -> None:
         """Download succeeds but save_registry_to_disk raises → returns False."""
         entries = [{"id": "lib", "name": "Lib", "llms_txt_url": "https://docs.lib.dev/llms.txt"}]
@@ -579,7 +571,6 @@ class TestWriteLastCheckedAt:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_check_for_registry_update_up_to_date_writes_last_checked_at(
     tmp_path: Path,
     indexes,
@@ -631,7 +622,6 @@ async def test_check_for_registry_update_up_to_date_writes_last_checked_at(
     assert state_data["last_checked_at"] != old_checked  # timestamp was refreshed
 
 
-@pytest.mark.asyncio
 async def test_check_for_registry_update_semantic_on_metadata_4xx(
     tmp_path: Path,
     indexes,
