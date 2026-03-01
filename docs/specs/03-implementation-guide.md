@@ -598,7 +598,7 @@ echo '{}' | uv run procontext  # Responds without crash
 
 ## 5. Testing Strategy
 
-**Framework**: `pytest` with `pytest-asyncio` (`asyncio_mode = "auto"`).
+**Framework**: `pytest` with `pytest-asyncio` (`asyncio_mode = "auto"` — all async test functions run without an explicit decorator). Async test helpers should use anyio primitives (`anyio.sleep`, `anyio.Event`, `anyio.fail_after`) rather than asyncio equivalents. See Rule 19 in `docs/coding-guidelines.md`.
 
 **HTTP mocking**: `respx` for mocking `httpx` requests. Never make real network calls in tests.
 
@@ -761,7 +761,7 @@ async def app_state(indexes, sample_entries):
 - HTTP transport: non-localhost origin → 403
 - HTTP transport: unknown protocol version → 400
 
-**Coverage target**: 90% line coverage. Branches covering network errors and cache misses are explicitly tested via mocking — not left to chance.
+**Coverage target**: 90% branch coverage (`branch = true` in `[tool.coverage.run]`). Branches covering network errors, cache misses, and config validation failures are explicitly tested via mocking — not left to chance.
 
 ---
 
@@ -802,10 +802,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --dev
 
       - name: Lint
         run: uv run ruff check src/ tests/
@@ -816,17 +816,18 @@ jobs:
       - name: Type check
         run: uv run pyright src/
 
-      - name: Unit tests
-        run: uv run pytest tests/unit/ --cov=src/procontext --cov-report=term-missing
+      - name: Tests with coverage
+        run: |
+          uv run pytest tests/ \
+            --cov=src/procontext \
+            --cov-report=term-missing \
+            --cov-fail-under=90
 
-      - name: Integration tests
-        run: uv run pytest tests/integration/ --cov=src/procontext --cov-append --cov-report=term-missing
-
-      - name: Coverage gate
-        run: uv run pytest tests/ --cov=src/procontext --cov-fail-under=90
+      - name: Dependency audit
+        run: uv run pip-audit
 ```
 
-**Unit and integration tests as separate steps**: Fails fast — a broken unit test is caught before running the slower integration suite. Combined coverage is reported at the end.
+All steps run in sequence; a lint or type-check failure aborts the workflow before tests run, keeping the feedback loop fast.
 
 ### release.yml — Release Pipeline
 

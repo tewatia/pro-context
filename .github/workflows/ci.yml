@@ -34,7 +34,7 @@ jobs:
           uv run pytest tests/ \
             --cov=src/procontext \
             --cov-report=term-missing \
-            --cov-fail-under=80
+            --cov-fail-under=90
 
       - name: Dependency audit
         run: uv run pip-audit
