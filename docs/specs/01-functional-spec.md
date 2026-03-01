@@ -270,7 +270,7 @@ For shared or remote deployments. Implements the MCP Streamable HTTP transport s
 # procontext.yaml
 server:
   transport: http
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 8080
   auth_enabled: false
   auth_key: ""

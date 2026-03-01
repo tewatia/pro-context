@@ -54,6 +54,8 @@ def test_procontext_error_serializes_to_structured_tool_error(
     stdout_lines = [line for line in proc.stdout.read().splitlines() if line.strip()]
     proc.stderr.read()  # Drain for clean process shutdown on all platforms
     proc.wait(timeout=10)
+    proc.stdout.close()
+    proc.stderr.close()
 
     responses = [json.loads(line) for line in stdout_lines]
     tool_response = next(response for response in responses if response.get("id") == 2)

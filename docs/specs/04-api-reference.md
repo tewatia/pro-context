@@ -899,7 +899,7 @@ Settings can also be passed as environment variables using the `PROCONTEXT__` pr
 # procontext.yaml
 server:
   transport: http
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 8080
   auth_enabled: false
   auth_key: ""

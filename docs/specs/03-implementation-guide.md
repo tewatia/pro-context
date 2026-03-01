@@ -46,7 +46,7 @@ procontext/
 ├── procontext.example.yaml          # Example config (committed); copy to procontext.yaml for local use
 ├── src/
 │   └── procontext/
-│       ├── __init__.py               # __version__ only
+│       ├── __init__.py               # package __version__ (resolved from installed metadata)
 │       ├── py.typed                  # PEP 561 marker — declares this package is typed
 │       ├── server.py                 # FastMCP instance, lifespan, tool registration, entrypoint
 │       ├── state.py                  # AppState dataclass
@@ -421,7 +421,7 @@ Each phase produces working, tested code. Later phases build on earlier ones wit
 | File                                | What to implement                                                                        |
 | ----------------------------------- | ---------------------------------------------------------------------------------------- |
 | `pyproject.toml`                    | Full dependency list, `[build-system]`, scripts entry point                              |
-| `src/procontext/__init__.py`        | `__version__ = "0.1.0"`                                                                  |
+| `src/procontext/__init__.py`        | Export package `__version__` from installed package metadata                             |
 | `src/procontext/py.typed`           | Empty file (PEP 561 marker)                                                              |
 | `src/procontext/errors.py`          | `ErrorCode` (StrEnum), `ProContextError`                                                 |
 | `src/procontext/models/__init__.py` | Empty re-export stub (populated later)                                                   |
@@ -874,7 +874,7 @@ jobs:
           subject-path: dist/
 ```
 
-`semantic-release publish` inspects commit history since the last tag, determines the next version (patch/minor/major), updates `CHANGELOG.md`, bumps `__version__` in `src/procontext/__init__.py`, creates a Git tag, builds the wheel, and publishes to PyPI. If no releasable commits exist (e.g., only `docs:` or `chore:` commits), it exits without publishing.
+`semantic-release publish` inspects commit history since the last tag, determines the next version (patch/minor/major), updates `CHANGELOG.md`, updates `project.version` in `pyproject.toml`, creates a Git tag, builds the wheel, and publishes to PyPI. If no releasable commits exist (e.g., only `docs:` or `chore:` commits), it exits without publishing.
 
 `actions/attest-build-provenance` generates a signed SLSA provenance attestation — a cryptographic record proving which source commit produced which artifact, via which build pipeline. This is attached to the GitHub release and is verifiable via `gh attestation verify`. Enterprise consumers increasingly require provenance before adopting a dependency.
 
@@ -887,7 +887,7 @@ jobs:
 # "python-semantic-release>=9.0.0,<10.0.0",  # Changelog generation + PyPI publishing
 
 [tool.semantic_release]
-version_variables = ["src/procontext/__init__.py:__version__"]
+version_toml = ["pyproject.toml:project.version"]
 changelog_file = "CHANGELOG.md"
 build_command = "uv build"
 ```

@@ -15,6 +15,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import structlog
 
+from procontext import __version__
 from procontext.config import FetcherSettings
 from procontext.errors import ErrorCode, ProContextError
 
@@ -42,7 +43,7 @@ def build_http_client(settings: FetcherSettings | None = None) -> httpx.AsyncCli
     return httpx.AsyncClient(
         follow_redirects=False,
         timeout=httpx.Timeout(timeout),
-        headers={"User-Agent": "procontext/1.0"},
+        headers={"User-Agent": f"procontext/{__version__}"},
         limits=httpx.Limits(
             max_connections=10,
             max_keepalive_connections=5,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Literal
 
 from pydantic import BaseModel, field_validator
 
@@ -38,7 +39,7 @@ class LibraryMatch(BaseModel):
     name: str
     languages: list[str]
     docs_url: str | None
-    matched_via: str  # "package_name" | "library_id" | "alias" | "fuzzy"
+    matched_via: Literal["package_name", "library_id", "alias", "fuzzy"]
     relevance: float  # 0.0–1.0
 
 

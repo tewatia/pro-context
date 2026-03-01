@@ -207,18 +207,7 @@ Severity uses a simple scale: **Critical** (system compromise), **High** (securi
 
 ## 4. Security Controls Summary
 
-| Control                         | Protects against                                            | Spec reference         | Source file                     | Phase |
-| ------------------------------- | ----------------------------------------------------------- | ---------------------- | ------------------------------- | ----- |
-| Optional bearer key auth (HTTP) | Unauthorized access in HTTP mode (when `auth_enabled=true`) | 02-technical-spec §8.2 | `transport.py`                  | 4     |
-| Domain allowlist (SSRF)         | Internal network access via fetcher                         | 02-technical-spec §5.2 | `fetcher.py`                    | 2     |
-| Private IP blocking             | Fetching localhost/private resources                        | 02-technical-spec §5.2 | `fetcher.py`                    | 2     |
-| Per-hop redirect validation     | Redirect-based SSRF bypass                                  | 02-technical-spec §5.3 | `fetcher.py`                    | 2     |
-| Pydantic input validation       | Malformed/oversized inputs                                  | 02-technical-spec §3.3 | `models/tools.py`               | 1–3   |
-| Registry checksum (SHA-256)     | Registry tampering                                          | 02-technical-spec §9   | `registry.py`                   | 5     |
-| Origin validation (HTTP)        | DNS rebinding attacks                                       | 02-technical-spec §8.2 | `transport.py`                  | 4     |
-| Protocol version check (HTTP)   | Unknown protocol exploitation                               | 02-technical-spec §8.2 | `transport.py`                  | 4     |
-| Dependency version bounds       | Major-version supply chain risk                             | 03-impl-guide §2       | `pyproject.toml`                | 0     |
-| SLSA provenance attestation     | Build pipeline tampering                                    | 03-impl-guide §6       | `.github/workflows/release.yml` | 5     |
+All security controls described in Sections 3.1–3.6 are implemented. See the referenced source files in each threat section for implementation details.
 
 ---
 

@@ -7,6 +7,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -66,8 +67,51 @@ def _run_mcp_exchange(env: dict[str, str], messages: list[dict]) -> list[dict]:
 
     proc.stderr.read()  # drain for reliable process shutdown
     proc.wait(timeout=10)
+    proc.stdout.close()
+    proc.stderr.close()
 
     return responses
+
+
+def _seed_toc_cache(
+    tmp_path: Path,
+    *,
+    library_id: str,
+    llms_txt_url: str,
+    content: str,
+) -> None:
+    db_path = tmp_path / "cache.db"
+    now = datetime.now(UTC)
+    expires_at = now + timedelta(hours=24)
+
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS toc_cache (
+                library_id         TEXT PRIMARY KEY,
+                llms_txt_url       TEXT NOT NULL,
+                content            TEXT NOT NULL,
+                discovered_domains TEXT NOT NULL DEFAULT '',
+                fetched_at         TEXT NOT NULL,
+                expires_at         TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO toc_cache
+            (library_id, llms_txt_url, content, fetched_at, expires_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                library_id,
+                llms_txt_url,
+                content,
+                now.isoformat(),
+                expires_at.isoformat(),
+            ),
+        )
+        conn.commit()
 
 
 def _seed_page_cache(
@@ -82,7 +126,7 @@ def _seed_page_cache(
     now = datetime.now(UTC)
     expires_at = now + timedelta(hours=24)
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS page_cache (
@@ -275,4 +319,94 @@ def test_read_page_wire_error_envelope(subprocess_env: dict[str, str]) -> None:
 
     payload = json.loads(tool_response["result"]["content"][0]["text"])
     assert payload["error"]["code"] == "URL_NOT_ALLOWED"
+    assert payload["error"]["recoverable"] is False
+
+
+def test_get_library_docs_wire_success_from_cache(
+    tmp_path: Path, subprocess_env: dict[str, str]
+) -> None:
+    _seed_toc_cache(
+        tmp_path,
+        library_id="langchain",
+        llms_txt_url="https://python.langchain.com/llms.txt",
+        content="# LangChain\n\n## Concepts\n\n- [Chat Models](https://python.langchain.com/docs/concepts/chat_models.md)",
+    )
+
+    responses = _run_mcp_exchange(
+        subprocess_env,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "pytest", "version": "0"},
+                },
+            },
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "get_library_docs",
+                    "arguments": {"library_id": "langchain"},
+                },
+            },
+        ],
+    )
+
+    tool_response = next(response for response in responses if response.get("id") == 2)
+    assert tool_response["result"]["isError"] is False
+
+    payload = json.loads(tool_response["result"]["content"][0]["text"])
+    assert payload["library_id"] == "langchain"
+    assert payload["name"] == "LangChain"
+    assert payload["cached"] is True
+    assert payload["stale"] is False
+    assert "# LangChain" in payload["content"]
+    assert set(payload.keys()) == {
+        "library_id",
+        "name",
+        "content",
+        "cached",
+        "cached_at",
+        "stale",
+    }
+
+
+def test_get_library_docs_wire_error_envelope(subprocess_env: dict[str, str]) -> None:
+    responses = _run_mcp_exchange(
+        subprocess_env,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "pytest", "version": "0"},
+                },
+            },
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "get_library_docs",
+                    "arguments": {"library_id": "nonexistent-lib"},
+                },
+            },
+        ],
+    )
+
+    tool_response = next(response for response in responses if response.get("id") == 2)
+    assert tool_response["result"]["isError"] is True
+
+    payload = json.loads(tool_response["result"]["content"][0]["text"])
+    assert payload["error"]["code"] == "LIBRARY_NOT_FOUND"
     assert payload["error"]["recoverable"] is False

@@ -7,7 +7,7 @@ No knowledge of AppState, MCP, or I/O.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from rapidfuzz import fuzz, process
 
@@ -85,7 +85,7 @@ def resolve_library(
 def _match_from_entry(
     entry: RegistryEntry,
     *,
-    matched_via: str,
+    matched_via: Literal["package_name", "library_id", "alias", "fuzzy"],
     relevance: float,
 ) -> LibraryMatch:
     """Build a LibraryMatch from a RegistryEntry."""

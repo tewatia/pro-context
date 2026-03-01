@@ -1153,7 +1153,7 @@ data_dir: ""  # default: platformdirs.user_data_dir("procontext"); override via 
 
 server:
   transport: stdio # stdio | http
-  host: "0.0.0.0" # HTTP mode only
+  host: "127.0.0.1" # HTTP mode only
   port: 8080 # HTTP mode only
   auth_enabled: false # HTTP mode only — default false
   auth_key: "" # HTTP mode only — used only when auth_enabled=true; if empty, auto-generated at startup
@@ -1201,7 +1201,7 @@ from pydantic_settings import (
 
 class ServerSettings(BaseModel):
     transport: Literal["stdio", "http"] = "stdio"
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8080
     auth_enabled: bool = False  # HTTP mode only — default false
     auth_key: str = ""  # HTTP mode only — used when auth_enabled=true; if empty, auto-generated

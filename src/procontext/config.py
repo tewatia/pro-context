@@ -40,14 +40,13 @@ def _find_config_file() -> str | None:
 
 class ServerSettings(BaseModel):
     transport: Literal["stdio", "http"] = "stdio"
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8080
     auth_enabled: bool = False
     auth_key: str = ""
 
 
 class RegistrySettings(BaseModel):
-    url: str = "https://procontext.github.io/known-libraries.json"
     metadata_url: str = "https://procontext.github.io/registry_metadata.json"
     poll_interval_hours: int = 24
 
