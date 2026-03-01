@@ -200,16 +200,16 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 }
 ```
 
-| Field         | Description                                                                                                                                               |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `headings`    | Plain-text heading map of the full page (always complete, regardless of offset/limit). Each line: `<line_number>: <heading line>`. Only H1–H4 included.  |
-| `total_lines` | Total number of lines in the full page. Useful for determining if more content exists beyond the current window.                                          |
-| `offset`      | The 1-based line number the returned content starts from.                                                                                                 |
-| `limit`       | The maximum number of lines requested.                                                                                                                    |
-| `content`     | Page markdown for the requested window (from offset, up to limit lines). May be shorter than limit if the page ends before the window fills.              |
-| `cached`      | Whether this response was served from cache                                                                                                               |
-| `cached_at`   | ISO 8601 timestamp (UTC) of when the content was originally fetched. `null` if not cached                                                                 |
-| `stale`       | `true` if the content is past its TTL and a background refresh has been triggered. Always present; defaults to `false`                                    |
+| Field         | Description                                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `headings`    | Plain-text heading map of the full page (always complete, regardless of offset/limit). Each line: `<line_number>: <heading line>`. Only H1–H4 included. |
+| `total_lines` | Total number of lines in the full page. Useful for determining if more content exists beyond the current window.                                        |
+| `offset`      | The 1-based line number the returned content starts from.                                                                                               |
+| `limit`       | The maximum number of lines requested.                                                                                                                  |
+| `content`     | Page markdown for the requested window (from offset, up to limit lines). May be shorter than limit if the page ends before the window fills.            |
+| `cached`      | Whether this response was served from cache                                                                                                             |
+| `cached_at`   | ISO 8601 timestamp (UTC) of when the content was originally fetched. `null` if not cached                                                               |
+| `stale`       | `true` if the content is past its TTL and a background refresh has been triggered. Always present; defaults to `false`                                  |
 
 **Notes**:
 
@@ -233,7 +233,7 @@ The default mode for local development. The MCP client (e.g., Claude Code, Curso
 - No network exposure — entirely local
 - Process lifecycle managed by the MCP client
 - Registry loaded from local disk when a valid local registry pair exists (`<data_dir>/registry/known-libraries.json` + `registry-state.json`). If no valid pair is found, the server attempts a one-time auto-setup (network fetch); if that also fails, it exits with an actionable error pointing to `procontext setup`.
-- SQLite database at `<data_dir>/cache.db`
+- SQLite database at `cache.db_path` (default: `platformdirs.user_data_dir("procontext")/cache.db`, configurable independently from `data_dir`)
 - No authentication required
 
 **Configuration** (in MCP client settings):
@@ -284,14 +284,14 @@ The library registry (`known-libraries.json`) is the data backbone of ProContext
 
 **Registry update cadence**: Weekly automated builds. Registry updates are independent of MCP server releases.
 
-**Custom registry**: The registry URL is configurable. Point `registry.url` and `registry.metadata_url` in `procontext.yaml` at any HTTP endpoint that serves the same JSON format to use a private registry. See D6 in Section 10 for details.
+**Custom registry**: The registry metadata endpoint is configurable. Point `registry.metadata_url` in `procontext.yaml` at any HTTP endpoint that serves the expected metadata JSON (including `download_url`) to use a private registry. See D6 in Section 10 for details.
 
 **At server startup**:
 
 1. Attempt to load local registry pair from `<data_dir>/registry/known-libraries.json` and `<data_dir>/registry/registry-state.json`
 2. Validate the pair (`known-libraries.json` parses, `registry-state.json` parses, checksum matches)
 3. If either file is missing or the pair is invalid: attempt a one-time auto-setup (network fetch of registry). If auto-setup also fails, the server exits with an error message pointing to `procontext setup`.
-4. In the background: check the configured registry URL for a newer version and download if available. The updated registry is used on the next server start (stdio) or atomically swapped in-memory in HTTP long-running mode (registry indexes + SSRF allowlist updated together).
+4. In the background: check the configured registry metadata endpoint for a newer version and download if available. The updated registry is used on the next server start (stdio) or atomically swapped in-memory in HTTP long-running mode (registry indexes + SSRF allowlist updated together).
 
 **Local state sidecar** (`registry-state.json`):
 
@@ -303,7 +303,7 @@ The library registry (`known-libraries.json`) is the data backbone of ProContext
 
 **Update scheduling policy**:
 
-- At startup, both transports attempt one registry update check, **gated by `last_checked_at`**: if the state file shows a check was performed within the configured `poll_interval_hours`, the startup check is skipped. This prevents redundant metadata fetches when a stdio server is restarted frequently.
+- At startup in stdio mode, the one-time registry update check is **gated by `last_checked_at`**: if the state file shows a check was performed within the configured `poll_interval_hours`, the startup check is skipped. In HTTP long-running mode, the scheduler performs an immediate initial check (unless explicitly delayed by startup skip conditions).
 - In HTTP long-running mode, successful checks follow a steady 24-hour cadence
 - In HTTP long-running mode, **transient** failures (network timeout/DNS/connection issues, upstream 5xx) retry with exponential backoff (starting at 1 minute, capped at 60 minutes, with jitter)
 - In HTTP long-running mode, after `8` consecutive transient failures, the failure counter and backoff reset, and checks return to 24-hour cadence. The next round gets a fresh set of fast-retry attempts.
@@ -333,7 +333,7 @@ All documentation is fetched via plain HTTP GET. ProContext uses `httpx` with:
 
 ### Cache
 
-A single SQLite database (`cache.db`) stores all fetched content.
+A single SQLite database stores all fetched content at `cache.db_path` (default: `platformdirs.user_data_dir("procontext")/cache.db`).
 
 | Table        | Key                  | Content              | TTL      |
 | ------------ | -------------------- | -------------------- | -------- |
@@ -405,16 +405,16 @@ Every error response follows the same structure:
 
 **Error codes**:
 
-| Code                    | Tool               | `recoverable` | Description                                                             |
-| ----------------------- | ------------------ | ------------- | ----------------------------------------------------------------------- |
-| `LIBRARY_NOT_FOUND`     | `get_library_docs` | `false`       | `library_id` not in registry; retrying won't help                       |
-| `LLMS_TXT_NOT_FOUND`    | `get_library_docs` | `false`       | HTTP 404 fetching llms.txt — the URL in the registry is incorrect       |
-| `LLMS_TXT_FETCH_FAILED` | `get_library_docs` | `true`        | Transient network error or server error fetching llms.txt; retry may succeed |
-| `PAGE_NOT_FOUND`        | `read_page`        | `false`       | HTTP 404 — the page does not exist at that URL                          |
-| `PAGE_FETCH_FAILED`     | `read_page`        | `true`        | Transient network error or non-200/404 HTTP response fetching page; retry may succeed |
-| `TOO_MANY_REDIRECTS`    | `get_library_docs`, `read_page` | `false` | Redirect chain exceeded the 3-hop safety limit                          |
-| `URL_NOT_ALLOWED`       | `read_page`        | `false`       | URL domain not in SSRF allowlist; only a different URL will succeed     |
-| `INVALID_INPUT`         | Any                | `false`       | Input validation failed; the request must be corrected before retrying  |
+| Code                    | Tool                            | `recoverable` | Description                                                                           |
+| ----------------------- | ------------------------------- | ------------- | ------------------------------------------------------------------------------------- |
+| `LIBRARY_NOT_FOUND`     | `get_library_docs`              | `false`       | `library_id` not in registry; retrying won't help                                     |
+| `LLMS_TXT_NOT_FOUND`    | `get_library_docs`              | `false`       | HTTP 404 fetching llms.txt — the URL in the registry is incorrect                     |
+| `LLMS_TXT_FETCH_FAILED` | `get_library_docs`              | `true`        | Transient network error or server error fetching llms.txt; retry may succeed          |
+| `PAGE_NOT_FOUND`        | `read_page`                     | `false`       | HTTP 404 — the page does not exist at that URL                                        |
+| `PAGE_FETCH_FAILED`     | `read_page`                     | `true`        | Transient network error or non-200/404 HTTP response fetching page; retry may succeed |
+| `TOO_MANY_REDIRECTS`    | `get_library_docs`, `read_page` | `false`       | Redirect chain exceeded the 3-hop safety limit                                        |
+| `URL_NOT_ALLOWED`       | `read_page`                     | `false`       | URL domain not in SSRF allowlist; only a different URL will succeed                   |
+| `INVALID_INPUT`         | Any                             | `false`       | Input validation failed; the request must be corrected before retrying                |
 
 ---
 
@@ -438,11 +438,10 @@ The registry (`known-libraries.json`) has its own release cadence (weekly) compl
 ProContext treats the llms.txt file as the authoritative interface to a library's documentation. It does not scrape HTML, parse Sphinx output, or infer documentation structure. Every library in the registry has a valid llms.txt URL — the MCP server only deals with fetching and parsing that format.
 
 **D6: Custom registry as the escape hatch for private documentation**
-Teams with internal libraries or private documentation can point ProContext at a custom registry by setting `registry.url` and `registry.metadata_url` in `procontext.yaml`:
+Teams with internal libraries or private documentation can point ProContext at a custom registry by setting `registry.metadata_url` in `procontext.yaml`:
 
 ```yaml
 registry:
-  url: "https://docs.internal.example.com/procontext/known-libraries.json"
   metadata_url: "https://docs.internal.example.com/procontext/registry_metadata.json"
 ```
 

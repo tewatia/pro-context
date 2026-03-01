@@ -2,11 +2,17 @@
 # All fields are optional — the server runs with defaults if this file is absent.
 #
 # Environment variable overrides use double-underscore as the nesting separator:
+#   PROCONTEXT__DATA_DIR=/custom/path/to/procontext-data
+#   PROCONTEXT__CACHE__DB_PATH=/custom/path/to/cache.db
 #   PROCONTEXT__SERVER__TRANSPORT=http
 #   PROCONTEXT__SERVER__PORT=9090
 #   PROCONTEXT__SERVER__AUTH_ENABLED=true
 #   PROCONTEXT__SERVER__AUTH_KEY=my-secret-key
 #   PROCONTEXT__LOGGING__LEVEL=DEBUG
+
+# Root data directory for ProContext registry state.
+# Override to relocate registry files.
+# data_dir: "/custom/path/to/procontext-data"
 
 server:
   transport: stdio     # stdio | http
@@ -17,7 +23,6 @@ server:
                        # if empty and auth_enabled=true, a random key is generated at startup
 
 registry:
-  url: "https://procontext.github.io/known-libraries.json"
   metadata_url: "https://procontext.github.io/registry_metadata.json"
   # How often to check for registry updates in HTTP mode (stdio checks once at startup).
   # Lower values keep library metadata fresher; higher values reduce outbound traffic.
@@ -27,7 +32,7 @@ cache:
   # How long fetched content is considered fresh before triggering a background re-fetch.
   # Applies to both llms.txt files (get_library_docs) and documentation pages (read_page).
   ttl_hours: 24
-  # db_path default is platform-specific (via platformdirs):
+  # db_path default is platform-specific (via platformdirs) and independent of data_dir:
   #   Linux:   ~/.local/share/procontext/cache.db
   #   macOS:   ~/Library/Application Support/procontext/cache.db
   #   Windows: C:\Users\<user>\AppData\Local\procontext\cache.db

@@ -100,7 +100,21 @@ This project follows a set of non-obvious coding guidelines. These must be appli
 
 See [`docs/coding-guidelines.md`](docs/coding-guidelines.md) for the full list.
 
-Key areas covered: API design, error handling, versioning and breaking changes, testing strategy, supply chain security, and maintainability.
+## Testing Requirements
+
+- Framework: `uv run --frozen pytest`
+- Async testing: use anyio, not asyncio
+- Coverage: test edge cases and errors
+- New features require tests
+- Bug fixes require regression tests
+- IMPORTANT: Before pushing, verify highest possible branch coverage on changed files by running
+  `uv run --frozen pytest -x` (coverage is configured in `pyproject.toml` with `fail_under = 90`
+  and `branch = true`). If any branch is uncovered, add a test for it before pushing.
+- Avoid `anyio.sleep()` with a fixed duration to wait for async operations. Instead:
+  - Use `anyio.Event` — set it in the callback/handler, `await event.wait()` in the test
+  - For stream messages, use `await stream.receive()` instead of `sleep()` + `receive_nowait()`
+  - Exception: `sleep()` is appropriate when testing time-based features (e.g., timeouts)
+- Wrap indefinite waits (`event.wait()`, `stream.receive()`) in `anyio.fail_after(5)` to prevent hangs
 
 ## Instructions for working with this repo
 

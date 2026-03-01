@@ -655,7 +655,7 @@ The return type is `str` (response text), not `httpx.Response`. This keeps `http
 
 ### 6.1 SQLite Schema
 
-Single database at `<data_dir>/cache.db` (where `<data_dir>` is the platform-specific data directory resolved by `platformdirs.user_data_dir("procontext")`). WAL mode is set once at connection time and persists — it does not need to be re-applied on subsequent opens.
+Single database at `cache.db_path` (default: `platformdirs.user_data_dir("procontext")/cache.db`). This default is intentionally independent from `data_dir` overrides. WAL mode is set once at connection time and persists — it does not need to be re-applied on subsequent opens.
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -1033,7 +1033,7 @@ The auto-setup in step 2 makes the server self-healing on first run: if a user f
 The update check uses two separate URLs:
 
 - **`registry.metadata_url`** — a tiny JSON file (`~200 bytes`) containing the current `version`, `checksum`, and `download_url`. Fetched on every poll cycle.
-- **`registry.url`** — the full registry JSON (potentially hundreds of KB). Fetched only when the remote `version` differs from the local one.
+- **`download_url`** (from metadata) — the full registry JSON (potentially hundreds of KB). Fetched only when the remote `version` differs from the local one.
 
 This split means that on a typical poll cycle where the registry has not changed, only the small metadata file is fetched. The full registry download is triggered only when there is actually an update — reducing outbound traffic significantly in long-running HTTP deployments.
 
@@ -1149,7 +1149,7 @@ transient (attempt = 8, reset)   poll_interval_hours × 3600
 Configuration is loaded from `procontext.yaml` (searched in current directory, then the platform config directory via `platformdirs.user_config_dir("procontext")`). All values have defaults — the config file is optional.
 
 ```yaml
-data_dir: ""  # default: platformdirs.user_data_dir("procontext"); override via PROCONTEXT__DATA_DIR
+data_dir: ""  # default: platformdirs.user_data_dir("procontext"); registry path root; override via PROCONTEXT__DATA_DIR
 
 server:
   transport: stdio # stdio | http
@@ -1159,13 +1159,12 @@ server:
   auth_key: "" # HTTP mode only — used only when auth_enabled=true; if empty, auto-generated at startup
 
 registry:
-  url: "https://procontext.github.io/known-libraries.json"
   metadata_url: "https://procontext.github.io/registry_metadata.json"
   poll_interval_hours: 24      # How often to check for a new registry version
 
 cache:
   ttl_hours: 24
-  # db_path: platform-specific default via platformdirs.user_data_dir("procontext")
+  # db_path: platform-specific default via platformdirs.user_data_dir("procontext") / "cache.db" (independent from data_dir override)
   cleanup_interval_hours: 6
 
 fetcher:
@@ -1193,7 +1192,6 @@ from typing import Any, Literal
 from pydantic import BaseModel
 from pydantic_settings import (
     BaseSettings,
-    EnvSettingsSource,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
     YamlConfigSettingsSource,
@@ -1207,13 +1205,12 @@ class ServerSettings(BaseModel):
     auth_key: str = ""  # HTTP mode only — used when auth_enabled=true; if empty, auto-generated
 
 class RegistrySettings(BaseModel):
-    url: str = "https://procontext.github.io/known-libraries.json"
     metadata_url: str = "https://procontext.github.io/registry_metadata.json"
     poll_interval_hours: int = 24
 
 class CacheSettings(BaseModel):
     ttl_hours: int = 24
-    db_path: str = _DEFAULT_DB_PATH  # platformdirs.user_data_dir("procontext") / "cache.db"
+    db_path: str = _DEFAULT_DB_PATH  # platformdirs.user_data_dir("procontext") / "cache.db" (independent from data_dir override)
     cleanup_interval_hours: int = 6
 
 class FetcherSettings(BaseModel):

@@ -226,7 +226,7 @@ async def get_toc(self, library_id: str) -> Optional[TocCacheEntry]: ...
 
 **Pydantic at all external boundaries.** Tool inputs are validated via Pydantic models before any processing. Registry JSON is parsed into `RegistryEntry` models on load. Never pass raw dicts between modules — use typed models.
 
-**Platform-aware data paths.** All filesystem defaults use `platformdirs` — never hardcode Unix paths like `~/.local/share/`. The registry and cache files live under `platformdirs.user_data_dir("procontext")` and are resolved via `Settings.data_dir`.
+**Platform-aware data paths.** All filesystem defaults use `platformdirs` — never hardcode Unix paths like `~/.local/share/`. Registry files are resolved via `Settings.data_dir` (default `platformdirs.user_data_dir("procontext")`). Cache uses `Settings.cache.db_path` (default `platformdirs.user_data_dir("procontext")/cache.db`), and remains independently configurable.
 
 ### 3.2 Protocol Interfaces
 
@@ -830,26 +830,21 @@ jobs:
 
 ### release.yml — Release Pipeline
 
-Runs only on pushes to `main` after the test pipeline passes. Uses `python-semantic-release` to automate version bumping, changelog generation, and PyPI publishing based on Conventional Commit history.
+Runs on manual trigger (`workflow_dispatch`) while the release process is still maturing. Maintainers should trigger it only after CI is green on `main`. Uses `python-semantic-release` to automate version bumping/tagging, then builds, attests, and publishes the artifacts.
 
 ```yaml
 # .github/workflows/release.yml
 name: Release
 
 on:
-  workflow_run:
-    workflows: [CI] # Triggers only after the CI workflow completes
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success' # Skip if CI failed
-    concurrency: release # Prevents concurrent releases
     permissions:
-      id-token: write # Required for PyPI trusted publishing (OIDC) and SLSA attestation
-      contents: write # Required to push tags and update CHANGELOG.md
+      id-token: write # Required for PyPI trusted publishing (OIDC)
+      contents: write # Required to push tags and update project version
       attestations: write # Required for SLSA provenance attestation
 
     steps:
@@ -858,27 +853,31 @@ jobs:
           fetch-depth: 0 # Full history required for semantic-release
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --dev
 
-      - name: Release
+      - name: Bump version and push tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: uv run semantic-release publish
+        run: uv run semantic-release version
+
+      - name: Build package
+        run: uv build
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: dist/
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing always
 ```
 
-`semantic-release publish` inspects commit history since the last tag, determines the next version (patch/minor/major), updates `CHANGELOG.md`, updates `project.version` in `pyproject.toml`, creates a Git tag, builds the wheel, and publishes to PyPI. If no releasable commits exist (e.g., only `docs:` or `chore:` commits), it exits without publishing.
+`semantic-release version` inspects commit history since the last tag, determines the next version (patch/minor/major), updates the project version, creates a release commit, and pushes a Git tag. The workflow then builds the wheel/sdist with `uv build`, generates a provenance attestation for `dist/`, and publishes to PyPI with trusted publishing.
 
 `actions/attest-build-provenance` generates a signed SLSA provenance attestation — a cryptographic record proving which source commit produced which artifact, via which build pipeline. This is attached to the GitHub release and is verifiable via `gh attestation verify`. Enterprise consumers increasingly require provenance before adopting a dependency.
-
-**Why `workflow_run` instead of `needs`**: `needs` only works between jobs in the same workflow file. To gate the release on a passing CI run from a separate `ci.yml`, `workflow_run` is required. The `if: conclusion == 'success'` condition ensures the release job is skipped entirely when CI fails.
 
 `python-semantic-release` and its `[tool.semantic_release]` config in `pyproject.toml` are added in Phase 5 — the release pipeline is not needed until the project is ready to publish.
 

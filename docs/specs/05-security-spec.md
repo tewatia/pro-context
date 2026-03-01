@@ -250,13 +250,15 @@ The SQLite cache stores documentation content without encryption. Local filesyst
 ## 6. Data Handling
 
 > **`<data_dir>`** = `platformdirs.user_data_dir("procontext")`: `~/.local/share/procontext` on Linux, `~/Library/Application Support/procontext` on macOS, `C:\Users\<user>\AppData\Local\procontext` on Windows.
+>
+> **`<db_path>`** = configured `cache.db_path` (default: `platformdirs.user_data_dir("procontext")/cache.db`).
 
 ### What is stored
 
 | Location                                                  | Content                                 | Purpose                                    |
 | --------------------------------------------------------- | --------------------------------------- | ------------------------------------------ |
-| `<data_dir>/cache.db`                      | `toc_cache` table: raw llms.txt content | Avoid re-fetching table of contents        |
-| `<data_dir>/cache.db`                      | `page_cache` table: full page markdown  | Avoid re-fetching documentation pages      |
+| `<db_path>`                                | `toc_cache` table: raw llms.txt content | Avoid re-fetching table of contents        |
+| `<db_path>`                                | `page_cache` table: full page markdown  | Avoid re-fetching documentation pages      |
 | `<data_dir>/registry/known-libraries.json` | Library registry                        | Local copy of the registry for offline use |
 | `<data_dir>/registry/registry-state.json`  | Registry metadata (`version`, `checksum`, `updated_at`, `last_checked_at`) | Local version/checksum source for update checks; `last_checked_at` gates startup polling |
 
@@ -275,7 +277,7 @@ The SQLite cache stores documentation content without encryption. Local filesyst
 
 ### Deletion
 
-Delete the ProContext data directory to remove all persistent data (cache + registry). The data directory is platform-specific (`<data_dir>` = `platformdirs.user_data_dir("procontext")`): `~/.local/share/procontext` on Linux, `~/Library/Application Support/procontext` on macOS, `C:\Users\<user>\AppData\Local\procontext` on Windows. No other filesystem locations are written to.
+Delete the ProContext data directory to remove registry files. Cache is removed by deleting the configured `cache.db_path` (which may be inside or outside `<data_dir>`). By default both reside under `platformdirs.user_data_dir("procontext")` (`~/.local/share/procontext` on Linux, `~/Library/Application Support/procontext` on macOS, `C:\Users\<user>\AppData\Local\procontext` on Windows).
 
 ### PII
 
