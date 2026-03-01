@@ -95,6 +95,10 @@ This project uses **pyright** (not mypy). Run `uv run pyright src/` to check. St
 
 The middleware enforces three checks in order: bearer auth → origin validation → protocol version. The ASGI `__call__` only intercepts `scope["type"] == "http"`; `lifespan` and `websocket` scopes pass through unconditionally.
 
+## Changelog Maintenance
+
+`CHANGELOG.md` is maintained via the `/changelog-release` skill — use it after committing to populate `[Unreleased]`, or with a version number to finalize a release section.
+
 ## Coding Guidelines
 
 This project follows a set of non-obvious coding guidelines specifically for public library development. These must be applied when writing or reviewing any code in this repo.
