@@ -20,6 +20,7 @@ from procontext.errors import ErrorCode, ProContextError
 
 if TYPE_CHECKING:
     from procontext.models.registry import RegistryEntry
+    from procontext.state import AppState
 
 log = structlog.get_logger()
 
@@ -89,6 +90,27 @@ def extract_base_domains_from_content(content: str) -> frozenset[str]:
         if hostname:
             domains.add(_base_domain(hostname))
     return frozenset(domains)
+
+
+def expand_allowlist_from_content(
+    content: str,
+    state: AppState,
+    *,
+    depth_threshold: int,
+) -> frozenset[str]:
+    """Extract discovered domains from content and optionally expand the live allowlist.
+
+    Always returns the full set of discovered domains for cache persistence,
+    regardless of depth configuration. Only mutates ``state.allowlist`` when
+    ``settings.fetcher.allowlist_depth >= depth_threshold``.
+    """
+    discovered_domains = extract_base_domains_from_content(content)
+    if state.settings.fetcher.allowlist_depth >= depth_threshold:
+        new_domains = discovered_domains - state.allowlist
+        if new_domains:
+            state.allowlist = state.allowlist | new_domains
+            log.info("allowlist_expanded", added_domains=len(new_domains))
+    return discovered_domains
 
 
 def is_url_allowed(

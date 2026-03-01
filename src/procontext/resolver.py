@@ -14,8 +14,7 @@ from rapidfuzz import fuzz, process
 from procontext.models.registry import LibraryMatch
 
 if TYPE_CHECKING:
-    from procontext.models.registry import RegistryEntry
-    from procontext.registry import RegistryIndexes
+    from procontext.models.registry import RegistryEntry, RegistryIndexes
 
 
 def normalise_query(raw: str) -> str:

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from procontext.resolver import normalise_query, resolve_library
 
 if TYPE_CHECKING:
-    from procontext.registry import RegistryIndexes
+    from procontext.models.registry import RegistryIndexes
 
 
 # ---------------------------------------------------------------------------

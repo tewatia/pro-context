@@ -20,8 +20,8 @@ if TYPE_CHECKING:
     import httpx
 
     from procontext.config import Settings
+    from procontext.models.registry import RegistryIndexes
     from procontext.protocols import CacheProtocol, FetcherProtocol
-    from procontext.registry import RegistryIndexes
 
 
 @dataclass

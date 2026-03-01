@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from procontext.errors import ErrorCode, ProContextError
-from procontext.fetcher import extract_base_domains_from_content, is_url_allowed
+from procontext.fetcher import expand_allowlist_from_content, is_url_allowed
 from procontext.models.tools import ReadPageInput, ReadPageOutput
 from procontext.parser import parse_headings
 
@@ -108,12 +108,7 @@ async def handle(url: str, offset: int, limit: int, state: AppState) -> dict:
 
     # Always extract discovered domains so they're persisted regardless of depth config.
     # Whether we expand the live allowlist is controlled by allowlist_depth.
-    discovered_domains = extract_base_domains_from_content(content)
-    if state.settings.fetcher.allowlist_depth >= 2:
-        new_domains = discovered_domains - state.allowlist
-        if new_domains:
-            state.allowlist = state.allowlist | new_domains
-            log.info("allowlist_expanded", added_domains=len(new_domains))
+    discovered_domains = expand_allowlist_from_content(content, state, depth_threshold=2)
 
     # Store in cache (non-fatal on failure — handled inside Cache)
     await state.cache.set_page(
@@ -188,12 +183,7 @@ async def _background_refresh(
         content = await state.fetcher.fetch(url, state.allowlist)
         headings = parse_headings(content)
 
-        discovered_domains = extract_base_domains_from_content(content)
-        if state.settings.fetcher.allowlist_depth >= 2:
-            new_domains = discovered_domains - state.allowlist
-            if new_domains:
-                state.allowlist = state.allowlist | new_domains
-                log.info("allowlist_expanded", added_domains=len(new_domains))
+        discovered_domains = expand_allowlist_from_content(content, state, depth_threshold=2)
 
         await state.cache.set_page(
             url=url,

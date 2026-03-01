@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel, field_validator
 
@@ -39,3 +40,24 @@ class LibraryMatch(BaseModel):
     docs_url: str | None
     matched_via: str  # "package_name" | "library_id" | "alias" | "fuzzy"
     relevance: float  # 0.0–1.0
+
+
+@dataclass
+class RegistryIndexes:
+    """In-memory indexes built from known-libraries.json at startup.
+
+    Four dicts rebuilt in a single pass (<100ms for 1,000 entries).
+    """
+
+    # package name (lowercase) → library ID  e.g. "langchain-openai" → "langchain"
+    by_package: dict[str, str] = field(default_factory=dict)
+
+    # library ID → full registry entry
+    by_id: dict[str, RegistryEntry] = field(default_factory=dict)
+
+    # alias (lowercase) → library ID  e.g. "lang-chain" → "langchain"
+    by_alias: dict[str, str] = field(default_factory=dict)
+
+    # flat list of (term, library_id) pairs for fuzzy matching
+    # populated from all IDs + package names + aliases (lowercased)
+    fuzzy_corpus: list[tuple[str, str]] = field(default_factory=list)
