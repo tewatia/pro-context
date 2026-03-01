@@ -7,7 +7,10 @@ tests/conftest.py (sample_entries, indexes).
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import aiosqlite
@@ -22,20 +25,53 @@ from procontext.state import AppState
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from procontext.models.registry import RegistryEntry
-    from procontext.registry import RegistryIndexes
+    from procontext.models.registry import RegistryEntry, RegistryIndexes
+
+
+def _write_registry(data_dir: "Path", entries: list[dict]) -> None:
+    """Write a valid registry pair to <data_dir>/registry/."""
+    registry_dir = data_dir / "registry"
+    registry_dir.mkdir(parents=True, exist_ok=True)
+    registry_bytes = json.dumps(entries).encode("utf-8")
+    checksum = "sha256:" + hashlib.sha256(registry_bytes).hexdigest()
+    (registry_dir / "known-libraries.json").write_bytes(registry_bytes)
+    now = datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
+    (registry_dir / "registry-state.json").write_text(
+        json.dumps({
+            "version": "test",
+            "checksum": checksum,
+            "updated_at": "2026-01-01T00:00:00Z",
+            "last_checked_at": now,
+        }),
+        encoding="utf-8",
+    )
 
 
 @pytest.fixture()
-def subprocess_env(tmp_path: Path) -> dict[str, str]:
+def subprocess_env(tmp_path: "Path") -> dict[str, str]:
     """Baseline env dict for subprocess-based MCP integration tests.
 
     Overrides any local procontext.yaml by forcing stdio transport, pointing
-    the cache to an isolated tmp directory, and redirecting the registry
-    metadata URL to an unlistened port so the first-run fetch fails fast.
+    all data paths to an isolated tmp directory, and seeding a minimal registry.
     """
+    _write_registry(tmp_path, [
+        {
+            "id": "requests",
+            "name": "requests",
+            "llms_txt_url": "https://docs.python-requests.org/llms.txt",
+            "packages": {"pypi": ["requests"]},
+        },
+        {
+            "id": "langchain",
+            "name": "LangChain",
+            "docs_url": "https://python.langchain.com/docs/",
+            "llms_txt_url": "https://python.langchain.com/llms.txt",
+            "packages": {"pypi": ["langchain", "langchain-openai", "langchain-core"]},
+        },
+    ])
     env = os.environ.copy()
     env["PROCONTEXT__SERVER__TRANSPORT"] = "stdio"
+    env["PROCONTEXT__DATA_DIR"] = str(tmp_path)
     env["PROCONTEXT__CACHE__DB_PATH"] = str(tmp_path / "cache.db")
     env["PROCONTEXT__REGISTRY__METADATA_URL"] = "http://127.0.0.1:1/registry_metadata.json"
     return env

@@ -12,9 +12,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import random
-import re
-import secrets
 import sys
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -22,34 +19,24 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 import structlog
-import uvicorn
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
-from starlette.datastructures import Headers
-from starlette.responses import Response
 
 import procontext.tools.get_library_docs as t_get_docs
 import procontext.tools.read_page as t_read_page
 import procontext.tools.resolve_library as t_resolve
 from procontext import __version__
 from procontext.cache import Cache
-from procontext.config import _DEFAULT_DATA_DIR, Settings
+from procontext.config import Settings
 from procontext.errors import ProContextError
 from procontext.fetcher import Fetcher, build_allowlist, build_http_client
-from procontext.registry import (
-    REGISTRY_INITIAL_BACKOFF_SECONDS,
-    REGISTRY_MAX_BACKOFF_SECONDS,
-    REGISTRY_MAX_TRANSIENT_BACKOFF_ATTEMPTS,
-    build_indexes,
-    check_for_registry_update,
-    load_registry,
-)
+from procontext.registry import build_indexes, fetch_registry_for_setup, load_registry
+from procontext.schedulers import run_cache_cleanup_scheduler, run_registry_update_scheduler
 from procontext.state import AppState
+from procontext.transport import run_http_server
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
-
-    from starlette.types import ASGIApp, Receive, Scope, Send
 
 log = structlog.get_logger()
 
@@ -90,131 +77,19 @@ def _setup_logging(settings: Settings) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _registry_paths() -> tuple[Path, Path]:
+def _registry_paths(settings: Settings) -> tuple[Path, Path]:
     """Return local registry pair paths for the current runtime."""
-    registry_dir = Path(_DEFAULT_DATA_DIR) / "registry"
+    registry_dir = Path(settings.data_dir) / "registry"
     return (
         registry_dir / "known-libraries.json",
         registry_dir / "registry-state.json",
     )
 
 
-def _jittered_delay(base_seconds: int) -> float:
-    return base_seconds * random.uniform(0.8, 1.2)
-
-
-def _log_bundled_registry_warning() -> None:
-    log.warning(
-        "registry_using_bundled_snapshot",
-        message=(
-            "Using bundled registry snapshot. Library data may be outdated. "
-            "Suggested next steps: "
-            "(1) Check your internet connection. "
-            "(2) Try restarting the server later. "
-            "(3) If the issue persists, download the registry manually from "
-            "the registry URL and place it in the data directory."
-        ),
-    )
-
-
-async def _maybe_blocking_first_run_fetch(state: AppState) -> bool:
-    """Attempt a one-shot blocking registry fetch on first run.
-
-    Uses split timeouts: 5s to connect (fail fast if unreachable), up to 5 minutes
-    to read (patient once the transfer has started).
-
-    Returns True if the fetch succeeded and state was updated.
-    """
-    try:
-        outcome = await check_for_registry_update(state)
-        if outcome == "success":
-            log.info("first_run_fetch_success", version=state.registry_version)
-            return True
-    except Exception:
-        log.warning("first_run_fetch_error", exc_info=True)
-
-    _log_bundled_registry_warning()
-    return False
-
-
-async def _run_cache_cleanup_scheduler(state: AppState) -> None:
-    """Run cache cleanup at startup and (HTTP mode) on the configured interval."""
-    interval_hours = state.settings.cache.cleanup_interval_hours
-
-    # Both transports: run at startup, skipping if it ran recently.
-    if state.cache is not None:
-        await state.cache.cleanup_if_due(interval_hours)
-
-    if state.settings.server.transport != "http":
-        return
-
-    # HTTP long-running mode: repeat on the configured interval.
-    while True:
-        await asyncio.sleep(interval_hours * 3600)
-        if state.cache is not None:
-            await state.cache.cleanup_if_due(interval_hours)
-
-
-async def _run_registry_update_scheduler(
-    state: AppState,
-    *,
-    skip_initial_check: bool = False,
-) -> None:
-    """Run startup update check and (HTTP mode) periodic registry update checks."""
-    if state.settings.server.transport != "http":
-        if not skip_initial_check:
-            try:
-                await check_for_registry_update(state)
-            except Exception:
-                log.warning("registry_update_scheduler_error", mode="startup_once", exc_info=True)
-        return
-
-    backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
-    consecutive_transient_failures = 0
-
-    while True:
-        try:
-            outcome = await check_for_registry_update(state)
-        except Exception:
-            log.warning("registry_update_scheduler_error", mode="http_loop", exc_info=True)
-            outcome = "semantic_failure"
-
-        poll_interval_seconds = state.settings.registry.poll_interval_hours * 3600
-
-        if outcome == "success":
-            consecutive_transient_failures = 0
-            backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
-            await asyncio.sleep(poll_interval_seconds)
-            continue
-
-        if outcome == "transient_failure":
-            consecutive_transient_failures += 1
-            if consecutive_transient_failures >= REGISTRY_MAX_TRANSIENT_BACKOFF_ATTEMPTS:
-                log.warning(
-                    "registry_update_transient_retry_suspended",
-                    consecutive_failures=consecutive_transient_failures,
-                    cooldown_seconds=poll_interval_seconds,
-                )
-                consecutive_transient_failures = 0
-                backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
-                await asyncio.sleep(poll_interval_seconds)
-                continue
-
-            await asyncio.sleep(_jittered_delay(backoff_seconds))
-            backoff_seconds = min(backoff_seconds * 2, REGISTRY_MAX_BACKOFF_SECONDS)
-            continue
-
-        # semantic failure
-        consecutive_transient_failures = 0
-        backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
-        await asyncio.sleep(poll_interval_seconds)
-
-
 @asynccontextmanager
 async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
     """Create and tear down all shared resources for the server's lifetime."""
     settings = Settings()
-    _setup_logging(settings)
 
     log.info(
         "server_starting",
@@ -222,13 +97,30 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
         transport=settings.server.transport,
     )
 
-    registry_path, registry_state_path = _registry_paths()
+    registry_path, registry_state_path = _registry_paths(settings)
 
     # Phase 1: Load registry and build indexes
-    entries, version = load_registry(
+    registry = load_registry(
         local_registry_path=registry_path,
         local_state_path=registry_state_path,
     )
+    auto_setup_ran = False
+    if registry is None:
+        log.info("registry_not_found_attempting_auto_setup")
+        await _attempt_registry_setup(settings, registry_path, registry_state_path)
+        registry = load_registry(
+            local_registry_path=registry_path, local_state_path=registry_state_path
+        )
+        auto_setup_ran = registry is not None
+
+    if registry is None:
+        print(
+            "\nRegistry not initialised. Run 'procontext setup' to download the registry.\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    entries, version = registry
     indexes = build_indexes(entries)
 
     # Phase 2: HTTP client, SSRF allowlist, cache, fetcher
@@ -266,16 +158,10 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
         allowlist=allowlist,
     )
 
-    # First run (bundled fallback): attempt a blocking fetch before serving
-    first_run_attempted = False
-    if version == "unknown":
-        first_run_attempted = True
-        await _maybe_blocking_first_run_fetch(state)
-
     registry_update_task = asyncio.create_task(
-        _run_registry_update_scheduler(state, skip_initial_check=first_run_attempted)
+        run_registry_update_scheduler(state, skip_initial_check=auto_setup_ran)
     )
-    cache_cleanup_task = asyncio.create_task(_run_cache_cleanup_scheduler(state))
+    cache_cleanup_task = asyncio.create_task(run_cache_cleanup_scheduler(state))
 
     log.info(
         "server_started",
@@ -383,104 +269,54 @@ async def read_page(url: str, ctx: Context, offset: int = 1, limit: int = 2000) 
 
 
 # ---------------------------------------------------------------------------
-# HTTP transport
-# ---------------------------------------------------------------------------
-
-SUPPORTED_PROTOCOL_VERSIONS: frozenset[str] = frozenset({"2025-11-25", "2025-03-26"})
-_LOCALHOST_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
-
-
-class MCPSecurityMiddleware:
-    """Pure ASGI middleware for HTTP transport security.
-
-    Enforces three checks on every HTTP request:
-    1. Optional bearer key authentication.
-    2. Origin validation (localhost only) to prevent DNS rebinding.
-    3. Protocol version validation via MCP-Protocol-Version header.
-
-    Implemented as pure ASGI (not BaseHTTPMiddleware) so that SSE streaming
-    responses are never buffered by the middleware layer.
-    """
-
-    def __init__(
-        self,
-        app: ASGIApp,
-        *,
-        auth_enabled: bool,
-        auth_key: str | None = None,
-    ) -> None:
-        self.app = app
-        self.auth_enabled = auth_enabled
-        self.auth_key = auth_key
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http":
-            headers = Headers(scope=scope)
-
-            # 1. Optional bearer key authentication
-            if self.auth_enabled:
-                auth_header = headers.get("authorization", "")
-                if not auth_header.startswith("Bearer ") or auth_header[7:] != self.auth_key:
-                    await Response("Unauthorized", status_code=401)(scope, receive, send)
-                    return
-
-            # 2. Origin validation — prevents DNS rebinding attacks
-            origin = headers.get("origin", "")
-            if origin and not _LOCALHOST_ORIGIN.match(origin):
-                await Response("Forbidden", status_code=403)(scope, receive, send)
-                return
-
-            # 3. Protocol version — reject unknown versions early
-            proto_version = headers.get("mcp-protocol-version", "")
-            if proto_version and proto_version not in SUPPORTED_PROTOCOL_VERSIONS:
-                await Response(
-                    f"Unsupported protocol version: {proto_version}",
-                    status_code=400,
-                )(scope, receive, send)
-                return
-
-        await self.app(scope, receive, send)
-
-
-def run_http_server(settings: Settings) -> None:
-    """Start the MCP server with Streamable HTTP transport."""
-    _setup_logging(settings)
-    http_log = structlog.get_logger().bind(transport="http")
-
-    auth_key: str | None = settings.server.auth_key or None
-
-    if settings.server.auth_enabled and not auth_key:
-        auth_key = secrets.token_urlsafe(32)
-        http_log.warning("http_auth_key_auto_generated", auth_key=auth_key)
-
-    if not settings.server.auth_enabled:
-        http_log.warning("http_auth_disabled")
-
-    http_app = mcp.streamable_http_app()
-    secured_app = MCPSecurityMiddleware(
-        http_app,
-        auth_enabled=settings.server.auth_enabled,
-        auth_key=auth_key,
-    )
-
-    uvicorn.run(
-        secured_app,
-        host=settings.server.host,
-        port=settings.server.port,
-        log_config=None,  # Disable uvicorn's default logging; structlog handles it
-    )
-
-
-# ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 
 
+async def _attempt_registry_setup(
+    settings: Settings,
+    registry_path: Path,
+    registry_state_path: Path,
+) -> bool:
+    """Try to fetch and persist the registry once. Returns True on success."""
+    http_client = build_http_client(settings.fetcher)
+    try:
+        return await fetch_registry_for_setup(
+            http_client=http_client,
+            metadata_url=settings.registry.metadata_url,
+            registry_path=registry_path,
+            registry_state_path=registry_state_path,
+        )
+    finally:
+        await http_client.aclose()
+
+
+async def _run_setup(settings: Settings) -> None:
+    """Fetch the registry from the configured URL and save it to the data directory."""
+    registry_path, registry_state_path = _registry_paths(settings)
+
+    print(f"Downloading registry from {settings.registry.metadata_url} ...", flush=True)
+
+    if await _attempt_registry_setup(settings, registry_path, registry_state_path):
+        print(
+            f"Registry initialised (saved to: {registry_path})",
+            flush=True,
+        )
+    else:
+        print("Setup failed. Check your network and try again.", file=sys.stderr)
+        sys.exit(1)
+
+
 def main() -> None:
     settings = Settings()
+    _setup_logging(settings)
+
+    if len(sys.argv) > 1 and sys.argv[1] == "setup":
+        asyncio.run(_run_setup(settings))
+        return
 
     if settings.server.transport == "http":
-        run_http_server(settings)
+        run_http_server(mcp, settings)
         return
 
     mcp.run()

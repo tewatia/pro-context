@@ -85,6 +85,7 @@ class Settings(BaseSettings):
         yaml_file_encoding="utf-8",
     )
 
+    data_dir: str = _DEFAULT_DATA_DIR
     server: ServerSettings = ServerSettings()
     registry: RegistrySettings = RegistrySettings()
     cache: CacheSettings = CacheSettings()
