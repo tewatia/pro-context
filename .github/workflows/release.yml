@@ -5,9 +5,11 @@ on:
 
 # contents: write  — push the version-bump commit and the vX.Y.Z tag
 # id-token: write — obtain an OIDC token for PyPI trusted publishing
+# attestations: write — publish SLSA provenance attestations for built artifacts
 permissions:
   contents: write
   id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -35,6 +37,11 @@ jobs:
 
       - name: Build package
         run: uv build
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/
 
       - name: Publish to PyPI
         # Requires a Trusted Publisher configured on pypi.org:
