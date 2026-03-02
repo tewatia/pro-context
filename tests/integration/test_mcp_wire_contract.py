@@ -410,3 +410,33 @@ def test_get_library_docs_wire_error_envelope(subprocess_env: dict[str, str]) ->
     payload = json.loads(tool_response["result"]["content"][0]["text"])
     assert payload["error"]["code"] == "LIBRARY_NOT_FOUND"
     assert payload["error"]["recoverable"] is False
+
+
+def test_server_exits_cleanly_when_registry_missing(tmp_path: Path) -> None:
+    """Server must exit with code 1 and a clean error message when the registry is
+    absent and auto-setup fails. Before the fix, sys.exit(1) inside the async
+    lifespan was wrapped in a BaseExceptionGroup by anyio, causing an ugly crash
+    traceback instead of a clean exit."""
+    import os
+
+    env = os.environ.copy()
+    env["PROCONTEXT__SERVER__TRANSPORT"] = "stdio"
+    env["PROCONTEXT__DATA_DIR"] = str(tmp_path)
+    env["PROCONTEXT__CACHE__DB_PATH"] = str(tmp_path / "cache.db")
+    # Point to an unreachable URL so auto-setup always fails fast.
+    env["PROCONTEXT__REGISTRY__METADATA_URL"] = "http://127.0.0.1:1/registry_metadata.json"
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "procontext.server"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=15,
+    )
+
+    assert proc.returncode == 1
+    assert "procontext setup" in proc.stderr
+    # Must NOT crash with an exception group traceback.
+    assert "ExceptionGroup" not in proc.stderr
+    assert "BaseExceptionGroup" not in proc.stderr

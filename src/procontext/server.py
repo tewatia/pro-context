@@ -100,26 +100,16 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
 
     registry_path, registry_state_path = _registry_paths(settings)
 
-    # Phase 1: Load registry and build indexes
+    # Registry availability is guaranteed by main() before the server starts.
     registry = load_registry(
         local_registry_path=registry_path,
         local_state_path=registry_state_path,
     )
-    auto_setup_ran = False
     if registry is None:
-        log.info("registry_not_found_attempting_auto_setup")
-        await _attempt_registry_setup(settings, registry_path, registry_state_path)
-        registry = load_registry(
-            local_registry_path=registry_path, local_state_path=registry_state_path
+        raise RuntimeError(
+            "Registry unavailable at server startup — this should have been caught before "
+            "the server started. This is a bug."
         )
-        auto_setup_ran = registry is not None
-
-    if registry is None:
-        print(
-            "\nRegistry not initialised. Run 'procontext setup' to download the registry.\n",
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
     entries, version = registry
     indexes = build_indexes(entries)
@@ -159,9 +149,7 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
         allowlist=allowlist,
     )
 
-    registry_update_task = asyncio.create_task(
-        run_registry_update_scheduler(state, skip_initial_check=auto_setup_ran)
-    )
+    registry_update_task = asyncio.create_task(run_registry_update_scheduler(state))
     cache_cleanup_task = asyncio.create_task(run_cache_cleanup_scheduler(state))
 
     log.info(
@@ -292,6 +280,19 @@ async def _attempt_registry_setup(
         await http_client.aclose()
 
 
+async def _ensure_registry(settings: Settings) -> bool:
+    """Check registry availability, attempt auto-setup if needed. Returns True if ready."""
+    registry_path, registry_state_path = _registry_paths(settings)
+    if load_registry(local_registry_path=registry_path, local_state_path=registry_state_path):
+        return True
+    log.info("registry_not_found_attempting_auto_setup")
+    await _attempt_registry_setup(settings, registry_path, registry_state_path)
+    return (
+        load_registry(local_registry_path=registry_path, local_state_path=registry_state_path)
+        is not None
+    )
+
+
 async def _run_setup(settings: Settings) -> None:
     """Fetch the registry from the configured URL and save it to the data directory."""
     registry_path, registry_state_path = _registry_paths(settings)
@@ -319,6 +320,13 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "setup":
         asyncio.run(_run_setup(settings))
         return
+
+    if not asyncio.run(_ensure_registry(settings)):
+        log.critical(
+            "registry_not_initialised",
+            hint="Run 'procontext setup' to download the registry.",
+        )
+        sys.exit(1)
 
     if settings.server.transport == "http":
         run_http_server(mcp, settings)

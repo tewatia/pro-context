@@ -63,15 +63,6 @@ class TestSchedulerStdioMode:
 
         mock_check.assert_not_awaited()
 
-    async def test_stdio_skip_initial_check(self) -> None:
-        state = _make_state(transport="stdio")
-        mock_check = AsyncMock(return_value="success")
-
-        with patch("procontext.schedulers.check_for_registry_update", mock_check):
-            await run_registry_update_scheduler(state, skip_initial_check=True)
-
-        mock_check.assert_not_awaited()
-
     async def test_stdio_swallows_exception(self) -> None:
         state = _make_state(transport="stdio")
         mock_check = AsyncMock(side_effect=RuntimeError("network down"))
@@ -259,9 +250,9 @@ class TestSchedulerHttpMode:
         assert sleep_durations[2] == state.settings.registry.poll_interval_hours * 3600
         assert sleep_durations[3] == REGISTRY_INITIAL_BACKOFF_SECONDS
 
-    async def test_http_skip_initial_check_sleeps_before_first_poll(self) -> None:
-        """With skip_initial_check=True in HTTP mode the scheduler sleeps for the
-        full poll interval BEFORE the first check, then resumes normal cadence.
+    async def test_http_delays_first_poll_when_registry_recently_checked(self) -> None:
+        """When registry_check_is_due returns False (e.g. auto-setup just ran), the
+        HTTP scheduler sleeps the full poll interval BEFORE the first check.
 
         Sequence: sleep(24h) → check → sleep(24h) → cancel
         """
@@ -276,11 +267,12 @@ class TestSchedulerHttpMode:
         mock_check = AsyncMock(return_value="success")
 
         with (
+            patch("procontext.schedulers.registry_check_is_due", return_value=False),
             patch("procontext.schedulers.check_for_registry_update", mock_check),
             patch("anyio.sleep", side_effect=fake_sleep),
             pytest.raises(asyncio.CancelledError),
         ):
-            await run_registry_update_scheduler(state, skip_initial_check=True)
+            await run_registry_update_scheduler(state)
 
         # First sleep happens before any check — the deferred initial poll.
         assert sleep_durations[0] == state.settings.registry.poll_interval_hours * 3600
