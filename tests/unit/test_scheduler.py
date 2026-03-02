@@ -22,6 +22,7 @@ from procontext.registry import (
 from procontext.schedulers import (
     _jittered_delay,
     run_cache_cleanup_scheduler,
+    run_registry_startup_check,
     run_registry_update_scheduler,
 )
 from procontext.state import AppState
@@ -47,7 +48,7 @@ class TestSchedulerStdioMode:
             patch("procontext.schedulers.registry_check_is_due", return_value=True),
             patch("procontext.schedulers.check_for_registry_update", mock_check),
         ):
-            await run_registry_update_scheduler(state)
+            await run_registry_startup_check(state)
 
         mock_check.assert_awaited_once_with(state)
 
@@ -59,7 +60,7 @@ class TestSchedulerStdioMode:
             patch("procontext.schedulers.registry_check_is_due", return_value=False),
             patch("procontext.schedulers.check_for_registry_update", mock_check),
         ):
-            await run_registry_update_scheduler(state)
+            await run_registry_startup_check(state)
 
         mock_check.assert_not_awaited()
 
@@ -71,7 +72,7 @@ class TestSchedulerStdioMode:
             patch("procontext.schedulers.registry_check_is_due", return_value=True),
             patch("procontext.schedulers.check_for_registry_update", mock_check),
         ):
-            await run_registry_update_scheduler(state)
+            await run_registry_startup_check(state)
 
         mock_check.assert_awaited_once()
 

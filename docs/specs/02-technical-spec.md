@@ -983,7 +983,7 @@ Two registry artefacts live on disk:
 ```
 
 - `updated_at` — set only when a new registry version is actually downloaded and persisted.
-- `last_checked_at` — set after every successful update check, even when the registry is already current. Used to gate the startup check in stdio mode: if the gap between now and `last_checked_at` is less than `registry.poll_interval_hours`, the startup check is skipped to avoid redundant metadata fetches on frequent restarts.
+- `last_checked_at` — set after every successful update check, even when the registry is already current. Used by both transports to gate checks: if the gap between now and `last_checked_at` is less than `registry.poll_interval_hours`, the startup check (stdio) or first poll (HTTP) is skipped to avoid redundant metadata fetches on frequent restarts or immediately after auto-setup.
 
 The local registry pair (both files together) is the consistency unit. If either file is missing, cannot be parsed, or the checksum in the state file does not match `sha256(known-libraries.json)`, the pair is considered invalid and the server treats it as if no registry exists.
 
@@ -1014,14 +1014,17 @@ It fetches the registry metadata, downloads the full registry, validates the che
 
 2. If local pair is missing or invalid →
       Attempt a blocking auto-setup (same as procontext setup).
-        On success → load the newly saved pair, set auto_setup_ran = True, proceed to step 3.
+        On success → load the newly saved pair, proceed to step 3.
         On failure → exit with:
           "Registry not initialised. Run 'procontext setup' to download the registry."
 
 3. Build in-memory indexes (RegistryIndexes) and SSRF allowlist from loaded data.
    Server is now ready to handle requests.
 
-4. Spawn background task: _run_registry_update_scheduler(skip_initial_check=auto_setup_ran)
+4. Spawn background task:
+      stdio  → run_registry_startup_check()   (runs once, consults last_checked_at)
+      HTTP   → run_registry_update_scheduler() (infinite loop, consults last_checked_at
+                                                before first poll)
 ```
 
 The auto-setup in step 2 makes the server self-healing on first run: if a user forgets to run `procontext setup`, a direct invocation will attempt to initialise the registry automatically. If the network is unavailable, the server exits with an actionable error rather than starting with no data.
@@ -1119,11 +1122,9 @@ Crash-safety guarantees:
 
 Registry update checks run differently depending on transport mode:
 
-**stdio mode** — checks once at startup (unless `skip_initial_check=True`) and exits. The process is typically short-lived (one agent session), so a polling loop would be wasteful.
+**stdio mode** — checks once at startup if `registry_check_is_due()` returns True, then exits. The process is typically short-lived (one agent session), so a polling loop would be wasteful.
 
-**HTTP mode** — loops indefinitely. If `skip_initial_check=True`, sleeps for `poll_interval_hours` before the first check. The poll interval after a successful check is controlled by `registry.poll_interval_hours` (default 24h, configurable). Transient failures are retried with exponential backoff; semantic failures return to the normal poll cadence without backoff.
-
-`skip_initial_check=True` is set when the auto-setup ran successfully at startup — the registry was just downloaded, so there is no value in immediately checking again.
+**HTTP mode** — loops indefinitely. Before the first check, consults `registry_check_is_due()`: if the registry was checked recently (e.g. auto-setup just ran), sleeps for `poll_interval_hours` before the first check; otherwise checks immediately. The poll interval after a successful check is controlled by `registry.poll_interval_hours` (default 24h, configurable). Transient failures are retried with exponential backoff; semantic failures return to the normal poll cadence without backoff.
 
 Backoff parameters (currently hardcoded, not configurable):
 - `INITIAL_BACKOFF = 60s`

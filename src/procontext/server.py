@@ -32,7 +32,11 @@ from procontext.config import Settings
 from procontext.errors import ProContextError
 from procontext.fetcher import Fetcher, build_allowlist, build_http_client
 from procontext.registry import build_indexes, fetch_registry_for_setup, load_registry
-from procontext.schedulers import run_cache_cleanup_scheduler, run_registry_update_scheduler
+from procontext.schedulers import (
+    run_cache_cleanup_scheduler,
+    run_registry_startup_check,
+    run_registry_update_scheduler,
+)
 from procontext.state import AppState
 from procontext.transport import run_http_server
 
@@ -149,7 +153,10 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
         allowlist=allowlist,
     )
 
-    registry_update_task = asyncio.create_task(run_registry_update_scheduler(state))
+    if settings.server.transport == "http":
+        registry_update_task = asyncio.create_task(run_registry_update_scheduler(state))
+    else:
+        registry_update_task = asyncio.create_task(run_registry_startup_check(state))
     cache_cleanup_task = asyncio.create_task(run_cache_cleanup_scheduler(state))
 
     log.info(
@@ -305,7 +312,12 @@ async def _run_setup(settings: Settings) -> None:
             flush=True,
         )
     else:
-        print("Setup failed. Check your network and try again.", file=sys.stderr)
+        print(
+            """Setup failed. Check your network and try again.
+If the error persists, you can manually download the registry,
+and configure it's path in procontext.yaml""",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
 

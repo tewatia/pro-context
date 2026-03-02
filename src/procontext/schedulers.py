@@ -44,26 +44,28 @@ async def run_cache_cleanup_scheduler(state: AppState) -> None:
             await state.cache.cleanup_if_due(interval_hours)
 
 
-async def run_registry_update_scheduler(state: AppState) -> None:
-    """Run startup update check and (HTTP mode) periodic registry update checks."""
+async def run_registry_startup_check(state: AppState) -> None:
+    """stdio mode: check for a registry update once at startup if one is due."""
     poll_interval = state.settings.registry.poll_interval_hours
+    if registry_check_is_due(state.registry_state_path, poll_interval):
+        try:
+            await check_for_registry_update(state)
+        except Exception:
+            log.warning("registry_update_scheduler_error", mode="startup_once", exc_info=True)
 
-    if state.settings.server.transport != "http":
-        if registry_check_is_due(state.registry_state_path, poll_interval):
-            try:
-                await check_for_registry_update(state)
-            except Exception:
-                log.warning("registry_update_scheduler_error", mode="startup_once", exc_info=True)
-        return
 
+async def run_registry_update_scheduler(state: AppState) -> None:
+    """HTTP mode: poll for registry updates on a configurable interval indefinitely."""
+    poll_interval = state.settings.registry.poll_interval_hours
+    poll_interval_seconds = poll_interval * 3600
     backoff_seconds = REGISTRY_INITIAL_BACKOFF_SECONDS
     consecutive_transient_failures = 0
 
-    # Delay the first HTTP poll if the registry was checked recently (e.g. auto-setup
-    # just ran). registry_check_is_due uses last_checked_at, which save_registry_to_disk
-    # always writes, so this naturally avoids a redundant fetch after first-run setup.
+    # Delay the first poll if the registry was checked recently (e.g. auto-setup just
+    # ran). registry_check_is_due uses last_checked_at, which save_registry_to_disk
+    # always writes, so this naturally avoids a redundant fetch on first run.
     if not registry_check_is_due(state.registry_state_path, poll_interval):
-        await anyio.sleep(poll_interval * 3600)
+        await anyio.sleep(poll_interval_seconds)
 
     while True:
         try:
@@ -71,8 +73,6 @@ async def run_registry_update_scheduler(state: AppState) -> None:
         except Exception:
             log.warning("registry_update_scheduler_error", mode="http_loop", exc_info=True)
             outcome = "semantic_failure"
-
-        poll_interval_seconds = state.settings.registry.poll_interval_hours * 3600
 
         if outcome == "success":
             consecutive_transient_failures = 0
