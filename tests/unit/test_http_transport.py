@@ -170,6 +170,33 @@ async def test_absent_protocol_version_allowed() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://[::1]",
+        "http://[::1]:8080",
+    ],
+)
+async def test_ipv6_localhost_origin_blocked(origin: str) -> None:
+    """IPv6 loopback ([::1]) is not matched by the origin regex — blocked by design.
+
+    The middleware only allows 'localhost' and '127.0.0.1'. IPv6 loopback is
+    intentionally excluded; this test documents and locks in that behaviour.
+    """
+    app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
+    async with _client(app) as client:
+        response = await client.get("/mcp", headers={"Origin": origin})
+    assert response.status_code == 403
+
+
+async def test_bearer_lowercase_returns_401() -> None:
+    """'bearer' (lowercase) does not match 'Bearer ' prefix check — returns 401."""
+    app = MCPSecurityMiddleware(_ok_app, auth_enabled=True, auth_key="secret-key")
+    async with _client(app) as client:
+        response = await client.get("/mcp", headers={"Authorization": "bearer secret-key"})
+    assert response.status_code == 401
+
+
 async def test_auth_checked_before_origin() -> None:
     """With auth enabled, a bad key returns 401 even if origin would be forbidden."""
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=True, auth_key="key")

@@ -110,6 +110,20 @@ class TestTocCache:
         assert entry is None
         cache._db.execute = original_execute  # type: ignore[assignment]
 
+    async def test_corrupted_fetched_at_returns_none(self, cache: Cache) -> None:
+        """A non-ISO timestamp in fetched_at raises ValueError — must be caught, not crash."""
+        future = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
+        await cache._db.execute(
+            "INSERT INTO toc_cache "
+            "(library_id, llms_txt_url, content, discovered_domains, fetched_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("corrupted", "https://example.com/llms.txt", "Content", "", "not-a-date", future),
+        )
+        await cache._db.commit()
+
+        entry = await cache.get_toc("corrupted")
+        assert entry is None
+
     async def test_write_failure_does_not_raise(self, cache: Cache) -> None:
         """Simulate a database write error — should not raise."""
         original_execute = cache._db.execute
@@ -152,6 +166,20 @@ class TestPageCache:
 
     async def test_get_nonexistent_returns_none(self, cache: Cache) -> None:
         entry = await cache.get_page("nonexistent-hash")
+        assert entry is None
+
+    async def test_corrupted_fetched_at_returns_none(self, cache: Cache) -> None:
+        """A non-ISO timestamp in fetched_at raises ValueError — must be caught, not crash."""
+        future = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
+        await cache._db.execute(
+            "INSERT INTO page_cache "
+            "(url_hash, url, content, headings, discovered_domains, fetched_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("bad-hash", "https://example.com/page", "Content", "", "", "not-a-date", future),
+        )
+        await cache._db.commit()
+
+        entry = await cache.get_page("bad-hash")
         assert entry is None
 
     async def test_expired_entry_returns_stale(self, cache: Cache) -> None:
@@ -414,6 +442,19 @@ class TestCleanupIfDue:
         assert row is not None
         # Timestamp should be newer than the stale value we wrote.
         assert datetime.fromisoformat(row[0]) > datetime.fromisoformat(stale)
+
+    async def test_corrupted_last_cleanup_at_falls_through_to_cleanup(self, cache: Cache) -> None:
+        """Corrupted last_cleanup_at timestamp raises ValueError — must fall through to cleanup."""
+        await cache._db.execute(
+            "INSERT INTO server_metadata (key, value) VALUES ('last_cleanup_at', ?)",
+            ("not-a-date",),
+        )
+        await cache._db.commit()
+        await _insert_expired_toc(cache, "old")
+
+        # Should not raise, and should still run cleanup
+        await cache.cleanup_if_due(24)
+        assert await cache.get_toc("old") is None
 
     async def test_metadata_read_error_falls_through_to_cleanup(self, cache: Cache) -> None:
         """aiosqlite.Error reading last_cleanup_at → cleanup still runs (fall-through)."""

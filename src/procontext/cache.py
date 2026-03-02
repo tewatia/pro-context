@@ -104,7 +104,7 @@ class Cache:
                 expires_at=expires_at,
                 stale=stale,
             )
-        except aiosqlite.Error:
+        except (aiosqlite.Error, ValueError):
             log.warning("cache_read_error", key=f"toc:{library_id}", exc_info=True)
             return None
 
@@ -168,7 +168,7 @@ class Cache:
                 expires_at=expires_at,
                 stale=stale,
             )
-        except aiosqlite.Error:
+        except (aiosqlite.Error, ValueError):
             log.warning("cache_read_error", key=f"page:{url_hash}", exc_info=True)
             return None
 
@@ -258,7 +258,7 @@ class Cache:
                 if datetime.now(UTC) - last_run < timedelta(hours=interval_hours):
                     log.debug("cache_cleanup_skipped", reason="not_due")
                     return
-        except aiosqlite.Error:
+        except (aiosqlite.Error, ValueError):
             log.warning("cache_metadata_read_error", exc_info=True)
 
         await self.cleanup_expired()

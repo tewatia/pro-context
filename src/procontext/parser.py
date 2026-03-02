@@ -18,6 +18,10 @@ def parse_headings(content: str) -> str:
     Returns one line per heading in the format ``"<lineno>: <heading line>"``,
     joined by newlines.  Returns an empty string if no headings are found.
     """
+    # Strip UTF-8 BOM if present — some servers prepend \ufeff to responses,
+    # which would prevent the heading regex from matching line 1.
+    content = content.removeprefix("\ufeff")
+
     lines: list[str] = []
 
     in_code_block = False

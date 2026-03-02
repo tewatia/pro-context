@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
+from procontext.models.tools import GetLibraryDocsInput, ReadPageInput, ResolveLibraryInput
 from procontext.resolver import normalise_query, resolve_library
 
 if TYPE_CHECKING:
@@ -158,6 +161,78 @@ class TestResolveLibraryStep5NoMatch:
 # ---------------------------------------------------------------------------
 # Result structure
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Input model boundary conditions
+# ---------------------------------------------------------------------------
+
+
+class TestResolveLibraryInputBoundary:
+    def test_query_at_500_chars_accepted(self) -> None:
+        validated = ResolveLibraryInput(query="a" * 500)
+        assert len(validated.query) == 500
+
+    def test_query_at_501_chars_raises(self) -> None:
+        with pytest.raises(ValueError, match="500"):
+            ResolveLibraryInput(query="a" * 501)
+
+    def test_whitespace_only_query_raises(self) -> None:
+        with pytest.raises(ValueError, match="empty"):
+            ResolveLibraryInput(query="   ")
+
+
+class TestGetLibraryDocsInputBoundary:
+    def test_valid_library_id(self) -> None:
+        validated = GetLibraryDocsInput(library_id="langchain")
+        assert validated.library_id == "langchain"
+
+    def test_library_id_with_leading_digit(self) -> None:
+        # Regex allows leading digits: ^[a-z0-9][a-z0-9_-]*$
+        validated = GetLibraryDocsInput(library_id="123abc")
+        assert validated.library_id == "123abc"
+
+    def test_library_id_uppercase_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Invalid library ID"):
+            GetLibraryDocsInput(library_id="LangChain")
+
+    def test_library_id_with_spaces_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Invalid library ID"):
+            GetLibraryDocsInput(library_id="lang chain")
+
+
+class TestReadPageInputBoundary:
+    def test_offset_at_1_accepted(self) -> None:
+        validated = ReadPageInput(url="https://example.com/page", offset=1, limit=10)
+        assert validated.offset == 1
+
+    def test_offset_zero_rejected(self) -> None:
+        with pytest.raises(ValueError, match="offset"):
+            ReadPageInput(url="https://example.com/page", offset=0, limit=10)
+
+    def test_limit_at_1_accepted(self) -> None:
+        validated = ReadPageInput(url="https://example.com/page", offset=1, limit=1)
+        assert validated.limit == 1
+
+    def test_limit_zero_rejected(self) -> None:
+        with pytest.raises(ValueError, match="limit"):
+            ReadPageInput(url="https://example.com/page", offset=1, limit=0)
+
+    def test_url_exceeding_2048_chars_rejected(self) -> None:
+        long_url = "https://example.com/" + "a" * 2030
+        assert len(long_url) > 2048
+        with pytest.raises(ValueError, match="2048"):
+            ReadPageInput(url=long_url)
+
+    def test_url_at_exactly_2048_chars_accepted(self) -> None:
+        url = "https://example.com/" + "a" * (2048 - len("https://example.com/"))
+        assert len(url) == 2048
+        validated = ReadPageInput(url=url)
+        assert len(validated.url) == 2048
+
+    def test_non_http_url_rejected(self) -> None:
+        with pytest.raises(ValueError, match="http"):
+            ReadPageInput(url="ftp://example.com/page")
 
 
 class TestMatchStructure:

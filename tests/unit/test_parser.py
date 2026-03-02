@@ -171,3 +171,18 @@ class TestEdgeCases:
     def test_only_whitespace_lines(self) -> None:
         content = "   \n  \n   "
         assert parse_headings(content) == ""
+
+    def test_utf8_bom_does_not_shift_line_numbers(self) -> None:
+        """A UTF-8 BOM (U+FEFF) prepended to content must not shift line numbers.
+
+        llms.txt files fetched from some servers include a BOM. The parser
+        operates on the decoded string; Python's str.splitlines() keeps the BOM
+        on line 1. A heading on line 1 should still be reported as line 1.
+        """
+        bom = "\ufeff"
+        content = f"{bom}# Title\n## Section"
+        result = parse_headings(content)
+        # Line 1 contains the BOM + heading — heading regex must still match
+        assert "# Title" in result
+        # The BOM line is line 1, so "# Title" is on line 1
+        assert result.startswith("1: ")

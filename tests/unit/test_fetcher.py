@@ -161,6 +161,13 @@ class TestIsUrlAllowed:
             check_domain=False,
         )
 
+    def test_url_with_no_hostname_blocked(self) -> None:
+        # urlparse("https://").hostname is None → falls back to "" → not in allowlist
+        assert not is_url_allowed("https://", frozenset({"example.com"}))
+
+    def test_url_with_empty_scheme_blocked(self) -> None:
+        assert not is_url_allowed("://example.com/path", frozenset({"example.com"}))
+
 
 # ---------------------------------------------------------------------------
 # extract_base_domains_from_content
@@ -338,6 +345,19 @@ class TestFetcher:
             with pytest.raises(ProContextError) as exc_info:
                 await fetcher.fetch("http://192.168.1.1/secret", frozenset())
             assert exc_info.value.code == ErrorCode.URL_NOT_ALLOWED
+
+    async def test_redirect_without_location_header(self) -> None:
+        # 3xx without Location: is_redirect is False in httpx (requires Location header),
+        # so the response falls through to is_success check → PAGE_FETCH_FAILED.
+        with respx.mock:
+            respx.get("https://example.com/broken-redirect").mock(
+                return_value=httpx.Response(301, headers={})
+            )
+            async with httpx.AsyncClient() as client:
+                fetcher = Fetcher(client)
+                with pytest.raises(ProContextError) as exc_info:
+                    await fetcher.fetch("https://example.com/broken-redirect", ALLOWLIST)
+                assert exc_info.value.code == ErrorCode.PAGE_FETCH_FAILED
 
     async def test_relative_redirect_resolved(self) -> None:
         with respx.mock:

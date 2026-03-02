@@ -520,6 +520,29 @@ def test_load_registry_returns_none_on_invalid_checksum_format(tmp_path: Path) -
     assert load_registry(registry_path, state_path) is None
 
 
+def test_build_indexes_duplicate_ids_last_entry_wins(tmp_path: Path) -> None:
+    """Duplicate library IDs in the registry silently overwrite — last entry wins.
+
+    This documents current behaviour. A future hardening pass could log a warning
+    or raise on duplicates, but today the second entry replaces the first in by_id.
+    """
+    from procontext.models.registry import RegistryEntry
+    from procontext.registry import build_indexes
+
+    entry_a = RegistryEntry(
+        id="duplicate",
+        name="First",
+        llms_txt_url="https://first.example.com/llms.txt",
+    )
+    entry_b = RegistryEntry(
+        id="duplicate",
+        name="Second",
+        llms_txt_url="https://second.example.com/llms.txt",
+    )
+    indexes = build_indexes([entry_a, entry_b])
+    assert indexes.by_id["duplicate"].name == "Second"
+
+
 def test_load_registry_returns_none_on_corrupt_json(tmp_path: Path) -> None:
     """A registry file that is not valid JSON → None."""
     registry_path = tmp_path / "known-libraries.json"
