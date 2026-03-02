@@ -15,15 +15,16 @@
 # data_dir: "/custom/path/to/procontext-data"
 
 server:
-  transport: stdio     # stdio | http
-  host: "0.0.0.0"     # HTTP mode only — address to bind the server to
-  port: 8080           # HTTP mode only — port to listen on
-  auth_enabled: false  # HTTP mode only — enable bearer key authentication
-  auth_key: ""         # HTTP mode only — key checked against Authorization header;
-                       # if empty and auth_enabled=true, a random key is generated at startup
+  transport: stdio # stdio | http
+  host: "0.0.0.0" # HTTP mode only — address to bind the server to
+  port: 8080 # HTTP mode only — port to listen on
+  auth_enabled: false # HTTP mode only — enable bearer key authentication
+  auth_key:
+    "" # HTTP mode only — key checked against Authorization header;
+    # if empty and auth_enabled=true, a random key is generated at startup
 
 registry:
-  metadata_url: "https://procontext.github.io/registry_metadata.json"
+  metadata_url: "https://procontexthq.github.io/registry_metadata.json"
   # How often to check for registry updates in HTTP mode (stdio checks once at startup).
   # Lower values keep library metadata fresher; higher values reduce outbound traffic.
   poll_interval_hours: 24
@@ -86,7 +87,7 @@ fetcher:
   # not just a specific one. Add shared hosting domains only if you trust the platform
   # broadly.
   extra_allowed_domains:
-    - github.com           # GitHub repository pages and documentation
+    - github.com # GitHub repository pages and documentation
     - githubusercontent.com # Raw GitHub file content (raw.githubusercontent.com)
 
 resolver:
@@ -101,5 +102,5 @@ resolver:
   fuzzy_max_results: 5
 
 logging:
-  level: INFO  # DEBUG | INFO | WARNING | ERROR
+  level: INFO # DEBUG | INFO | WARNING | ERROR
   format: json # json | text  (use text for local development)

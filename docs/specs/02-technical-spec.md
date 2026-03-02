@@ -964,10 +964,10 @@ The registry update system keeps the in-memory library index fresh without inter
 
 Two registry artefacts live on disk:
 
-| Artefact | Location | Purpose |
-|---|---|---|
-| **Local registry** | `<data_dir>/registry/known-libraries.json` | Downloaded by `procontext setup` and updated by the background scheduler. |
-| **Local state file** | `<data_dir>/registry/registry-state.json` | Stores `version`, `sha256` checksum, `updated_at`, and `last_checked_at` for the local registry. |
+| Artefact             | Location                                   | Purpose                                                                                          |
+| -------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| **Local registry**   | `<data_dir>/registry/known-libraries.json` | Downloaded by `procontext setup` and updated by the background scheduler.                        |
+| **Local state file** | `<data_dir>/registry/registry-state.json`  | Stores `version`, `sha256` checksum, `updated_at`, and `last_checked_at` for the local registry. |
 
 `<data_dir>` defaults to `platformdirs.user_data_dir("procontext")` and can be overridden via `PROCONTEXT__DATA_DIR`.
 
@@ -1060,11 +1060,11 @@ Poll cycle:
 
 `check_for_registry_update()` returns one of three outcomes, which the scheduler uses to decide the next sleep interval:
 
-| Outcome | Meaning | Examples |
-|---|---|---|
-| `"success"` | Registry is up to date or was successfully updated | Version match, clean download + checksum pass |
-| `"transient_failure"` | Recoverable infrastructure problem — retry with backoff | Network timeout, DNS failure, upstream 5xx/408/429 |
-| `"semantic_failure"` | Non-recoverable data problem — retrying immediately won't help | Invalid metadata shape, checksum mismatch, schema parse failure |
+| Outcome               | Meaning                                                        | Examples                                                        |
+| --------------------- | -------------------------------------------------------------- | --------------------------------------------------------------- |
+| `"success"`           | Registry is up to date or was successfully updated             | Version match, clean download + checksum pass                   |
+| `"transient_failure"` | Recoverable infrastructure problem — retry with backoff        | Network timeout, DNS failure, upstream 5xx/408/429              |
+| `"semantic_failure"`  | Non-recoverable data problem — retrying immediately won't help | Invalid metadata shape, checksum mismatch, schema parse failure |
 
 Transient failures are retried aggressively with exponential backoff. Semantic failures skip backoff and return to the normal poll cadence — the assumption is that a malformed registry is a publisher-side bug that will be fixed before the next scheduled check.
 
@@ -1108,11 +1108,11 @@ The allowlist is always reset to the registry baseline on each successful update
 
 Crash-safety guarantees:
 
-| Failure point | Effect on disk | Next startup behaviour |
-|---|---|---|
-| Crash during temp write | Destination files untouched | Load previous valid pair |
+| Failure point                                    | Effect on disk                | Next startup behaviour                            |
+| ------------------------------------------------ | ----------------------------- | ------------------------------------------------- |
+| Crash during temp write                          | Destination files untouched   | Load previous valid pair                          |
 | Crash after registry rename, before state rename | Registry updated, state stale | Checksum mismatch → auto-setup or exit with error |
-| Crash after both renames | Both files updated | Load new pair normally |
+| Crash after both renames                         | Both files updated            | Load new pair normally                            |
 
 `_fsync_directory()` is a no-op on Windows (`sys.platform == "win32"` guard) since Windows does not support `fsync` on directory handles. The write-then-rename guarantee still holds; only the directory entry durability is weaker.
 
@@ -1127,6 +1127,7 @@ Registry update checks run differently depending on transport mode:
 **HTTP mode** — loops indefinitely. Before the first check, consults `registry_check_is_due()`: if the registry was checked recently (e.g. auto-setup just ran), sleeps for `poll_interval_hours` before the first check; otherwise checks immediately. The poll interval after a successful check is controlled by `registry.poll_interval_hours` (default 24h, configurable). Transient failures are retried with exponential backoff; semantic failures return to the normal poll cadence without backoff.
 
 Backoff parameters (currently hardcoded, not configurable):
+
 - `INITIAL_BACKOFF = 60s`
 - `MAX_BACKOFF = 3600s`
 - `MAX_TRANSIENT_BACKOFF_ATTEMPTS = 8`
@@ -1150,7 +1151,7 @@ transient (attempt = 8, reset)   poll_interval_hours × 3600
 Configuration is loaded from `procontext.yaml` (searched in current directory, then the platform config directory via `platformdirs.user_config_dir("procontext")`). All values have defaults — the config file is optional.
 
 ```yaml
-data_dir: ""  # default: platformdirs.user_data_dir("procontext"); registry path root; override via PROCONTEXT__DATA_DIR
+data_dir: "" # default: platformdirs.user_data_dir("procontext"); registry path root; override via PROCONTEXT__DATA_DIR
 
 server:
   transport: stdio # stdio | http
@@ -1160,8 +1161,8 @@ server:
   auth_key: "" # HTTP mode only — used only when auth_enabled=true; if empty, auto-generated at startup
 
 registry:
-  metadata_url: "https://procontext.github.io/registry_metadata.json"
-  poll_interval_hours: 24      # How often to check for a new registry version
+  metadata_url: "https://procontexthq.github.io/registry_metadata.json"
+  poll_interval_hours: 24 # How often to check for a new registry version
 
 cache:
   ttl_hours: 24
@@ -1169,17 +1170,17 @@ cache:
   cleanup_interval_hours: 6
 
 fetcher:
-  ssrf_private_ip_check: true  # block private/internal IPs; strongly recommended
-  ssrf_domain_check: true      # enforce domain allowlist; set false only in isolated environments
-  allowlist_depth: 0           # 0=registry only | 1=+llms.txt links | 2=+page links
-  extra_allowed_domains:       # always trusted, merged at startup regardless of depth
+  ssrf_private_ip_check: true # block private/internal IPs; strongly recommended
+  ssrf_domain_check: true # enforce domain allowlist; set false only in isolated environments
+  allowlist_depth: 0 # 0=registry only | 1=+llms.txt links | 2=+page links
+  extra_allowed_domains: # always trusted, merged at startup regardless of depth
     - github.com
     - githubusercontent.com
   request_timeout_seconds: 30.0 # per-request read timeout for documentation fetches
 
 resolver:
-  fuzzy_score_cutoff: 70        # minimum rapidfuzz score (0–100) for a fuzzy match to count
-  fuzzy_max_results: 5          # maximum number of fuzzy candidates returned
+  fuzzy_score_cutoff: 70 # minimum rapidfuzz score (0–100) for a fuzzy match to count
+  fuzzy_max_results: 5 # maximum number of fuzzy candidates returned
 
 logging:
   level: INFO # DEBUG | INFO | WARNING | ERROR
@@ -1206,7 +1207,7 @@ class ServerSettings(BaseModel):
     auth_key: str = ""  # HTTP mode only — used when auth_enabled=true; if empty, auto-generated
 
 class RegistrySettings(BaseModel):
-    metadata_url: str = "https://procontext.github.io/registry_metadata.json"
+    metadata_url: str = "https://procontexthq.github.io/registry_metadata.json"
     poll_interval_hours: int = 24
 
 class CacheSettings(BaseModel):
@@ -1294,20 +1295,20 @@ async def get_library_docs_handler(library_id: str) -> dict:
 
 **Key log events and their fields**:
 
-| Event                    | Fields                                               |
-| ------------------------ | ---------------------------------------------------- |
-| `server_started`         | `transport`, `version`, `registry_entries`, `registry_version` |
-| `registry_loaded`        | `version`, `entries`, `source` (`disk`) — `version` comes from `registry-state.json` |
-| `registry_updated`       | `version`, `entries`                                 |
-| `registry_local_pair_invalid` | `reason`, `path_registry`, `path_state`       |
-| `registry_persist_failed` | `version`, `error`                                   |
-| `cache_hit`              | `tool`, `library_id` or `url_hash`                   |
-| `cache_miss_fetching`    | `tool`, `url`                                        |
-| `fetch_complete`         | `url`, `status_code`, `content_length`               |
-| `fetch_failed`           | `url`, `error`, `status_code`                        |
-| `ssrf_blocked`           | `url`, `reason`                                      |
-| `stale_refresh_started`  | `key`                                                |
-| `stale_refresh_complete` | `key`, `changed`                                     |
-| `stale_refresh_failed`   | `key`, `error`                                       |
-| `cache_read_error`       | `key`                                                |
-| `cache_write_error`      | `key`                                                |
+| Event                         | Fields                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| `server_started`              | `transport`, `version`, `registry_entries`, `registry_version`                       |
+| `registry_loaded`             | `version`, `entries`, `source` (`disk`) — `version` comes from `registry-state.json` |
+| `registry_updated`            | `version`, `entries`                                                                 |
+| `registry_local_pair_invalid` | `reason`, `path_registry`, `path_state`                                              |
+| `registry_persist_failed`     | `version`, `error`                                                                   |
+| `cache_hit`                   | `tool`, `library_id` or `url_hash`                                                   |
+| `cache_miss_fetching`         | `tool`, `url`                                                                        |
+| `fetch_complete`              | `url`, `status_code`, `content_length`                                               |
+| `fetch_failed`                | `url`, `error`, `status_code`                                                        |
+| `ssrf_blocked`                | `url`, `reason`                                                                      |
+| `stale_refresh_started`       | `key`                                                                                |
+| `stale_refresh_complete`      | `key`, `changed`                                                                     |
+| `stale_refresh_failed`        | `key`, `error`                                                                       |
+| `cache_read_error`            | `key`                                                                                |
+| `cache_write_error`           | `key`                                                                                |

@@ -50,7 +50,7 @@ class ServerSettings(BaseModel):
 
 class RegistrySettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    metadata_url: str = "https://procontext.github.io/registry_metadata.json"
+    metadata_url: str = "https://procontexthq.github.io/registry_metadata.json"
     poll_interval_hours: int = 24
 
 
