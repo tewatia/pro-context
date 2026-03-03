@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`resolve_library` no longer returns `docs_url`** — the field has been
+  removed from the response. It was the human-facing documentation homepage and
+  is not a valid input to any tool, serving no purpose in the agent workflow.
+  Use `get_library_docs` to retrieve the llms.txt table of contents and then
+  `read_page` for individual pages.
+
 - **Bundled registry snapshot removed** — the server no longer ships with an
   embedded registry. Use `procontext setup` to initialise the registry before
   first use (or let the auto-setup fallback handle it on the first run).
@@ -34,6 +40,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   giving more predictable behaviour on slow or unreliable connections.
 
 ### Fixed
+
+- **Registry metadata URL updated** — the default `metadata_url` now points to
+  `procontexthq.github.io`. Users who have not overridden this setting will
+  automatically use the correct endpoint after upgrading.
+- **Server exits cleanly when registry is missing** — previously, a missing
+  registry at startup caused an unhandled `BaseExceptionGroup` traceback.
+  The server now exits with code 1 and a clear message directing users to run
+  `procontext setup`.
+- **Cache write no longer raises `ValueError` on certain edge cases** — a
+  `ValueError` that could surface during cache writes under specific conditions
+  has been fixed.
+- **Heading parser now handles UTF-8 BOM and indented headings** — headings on
+  line 1 of pages served with a UTF-8 BOM are now correctly detected. The
+  parser also supports CommonMark-compliant indented headings (up to 3 leading
+  spaces), improving compatibility with a wider range of documentation pages.
 
 - **Config typos now fail loudly at startup** — unknown fields in
   `procontext.yaml` are rejected with a clear, human-readable error message

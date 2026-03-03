@@ -230,3 +230,4 @@ If you want to add a library or update an existing registry entry, open a PR the
 ## Questions?
 
 - Open a [GitHub Issue](https://github.com/procontexthq/procontext/issues) for bugs or concrete feature requests.
+- Use [GitHub Discussions](https://github.com/procontexthq/procontext/discussions) for questions, ideas, or anything that isn't a bug or actionable request.
