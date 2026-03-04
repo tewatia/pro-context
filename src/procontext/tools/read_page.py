@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import structlog
 
@@ -24,14 +24,20 @@ if TYPE_CHECKING:
     from procontext.state import AppState
 
 
-async def handle(url: str, offset: int, limit: int, state: AppState) -> dict:
+async def handle(
+    url: str,
+    offset: int,
+    limit: int,
+    state: AppState,
+    view: Literal["headings", "full"] = "full",
+) -> dict:
     """Handle a read_page tool call."""
     log = structlog.get_logger().bind(tool="read_page", url=url)
     log.info("handler_called")
 
     # Validate input
     try:
-        validated = ReadPageInput(url=url, offset=offset, limit=limit)
+        validated = ReadPageInput(url=url, offset=offset, limit=limit, view=view)
     except ValueError as exc:
         raise ProContextError(
             code=ErrorCode.INVALID_INPUT,
@@ -73,6 +79,7 @@ async def handle(url: str, offset: int, limit: int, state: AppState) -> dict:
             headings=cached_entry.headings,
             offset=validated.offset,
             limit=validated.limit,
+            view=validated.view,
             cached=True,
             cached_at=cached_entry.fetched_at,
             stale=False,
@@ -94,6 +101,7 @@ async def handle(url: str, offset: int, limit: int, state: AppState) -> dict:
             headings=cached_entry.headings,
             offset=validated.offset,
             limit=validated.limit,
+            view=validated.view,
             cached=True,
             cached_at=cached_entry.fetched_at,
             stale=True,
@@ -126,6 +134,7 @@ async def handle(url: str, offset: int, limit: int, state: AppState) -> dict:
         headings=headings,
         offset=validated.offset,
         limit=validated.limit,
+        view=validated.view,
         cached=False,
         cached_at=None,
         stale=False,
@@ -139,6 +148,7 @@ def _build_output(
     headings: str,
     offset: int,
     limit: int,
+    view: Literal["headings", "full"],
     cached: bool,
     cached_at: datetime | None,
     stale: bool,
@@ -147,9 +157,13 @@ def _build_output(
     all_lines = content.splitlines()
     total_lines = len(all_lines)
 
-    # Window: offset is 1-based
-    windowed = all_lines[offset - 1 : offset - 1 + limit]
-    windowed_content = "\n".join(windowed)
+    # Window: offset is 1-based. Skipped for headings-only view.
+    windowed_content: str | None
+    if view == "full":
+        windowed = all_lines[offset - 1 : offset - 1 + limit]
+        windowed_content = "\n".join(windowed)
+    else:
+        windowed_content = None
 
     output = ReadPageOutput(
         url=url,
@@ -162,7 +176,11 @@ def _build_output(
         cached_at=cached_at,
         stale=stale,
     )
-    return output.model_dump(mode="json")
+    result = output.model_dump(mode="json")
+    # content is intentionally absent in view="headings" responses
+    if result["content"] is None:
+        del result["content"]
+    return result
 
 
 async def _background_refresh(

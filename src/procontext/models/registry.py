@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class RegistryPackages(BaseModel):
@@ -35,11 +35,15 @@ class RegistryEntry(BaseModel):
 class LibraryMatch(BaseModel):
     """Single result returned by resolve_library."""
 
-    library_id: str
-    name: str
-    languages: list[str]
-    matched_via: Literal["package_name", "library_id", "alias", "fuzzy"]
-    relevance: float  # 0.0–1.0
+    library_id: str = Field(description="Unique library identifier to pass to get_library_docs.")
+    name: str = Field(description="Human-readable library name.")
+    languages: list[str] = Field(description="Programming languages this library supports.")
+    matched_via: Literal["package_name", "library_id", "alias", "fuzzy"] = Field(
+        description="Match method: package_name, library_id, alias, or fuzzy text match."
+    )
+    relevance: float = Field(
+        description="Match confidence 0.0 (low) to 1.0 (high). Sort by this to find the best match."
+    )
 
 
 @dataclass

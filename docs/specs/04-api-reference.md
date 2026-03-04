@@ -518,14 +518,14 @@ Result:
 
 ## 4. Tool: read_page
 
-**Purpose**: Fetch the content of a documentation page with line-number navigation. Returns a heading map of the full page and a windowed slice of the content controlled by `offset` and `limit`.
+**Purpose**: Fetch a documentation page from a URL returned by `get_library_docs`. Returns a heading map of the full page (H1–H4) with 1-based line numbers, and optionally a windowed slice of content. The `view` parameter controls what is returned.
 
 ### 4.1 Input Schema
 
 ```json
 {
   "name": "read_page",
-  "description": "Fetch the content of a documentation page. Returns a plain-text heading map (line numbers + heading text) for the full page, and a content window controlled by offset and limit. Use headings to find sections, then call again with offset to jump directly to them.",
+  "description": "Fetch a documentation page from a URL returned by get_library_docs. Two views: view=\"full\" (default) returns the heading map and a content window; view=\"headings\" returns the heading map and total_lines only. The heading map lists every H1–H4 heading with its 1-based line number. Use view=\"headings\" to scan structure across candidate pages, then call with view=\"full\" and offset=<line number> to jump to the relevant section.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -534,17 +534,23 @@ Result:
         "description": "URL of the documentation page, typically extracted from get_library_docs output. Must use http or https. Must be a domain from the library registry.",
         "maxLength": 2048
       },
+      "view": {
+        "type": "string",
+        "enum": ["full", "headings"],
+        "default": "full",
+        "description": "\"full\" returns the heading map plus a content window. \"headings\" returns the heading map and total_lines only, without page content."
+      },
       "offset": {
         "type": "integer",
         "minimum": 1,
         "default": 1,
-        "description": "1-based line number to start reading from. Defaults to 1 (beginning of page). Use a heading's line number to jump directly to that section."
+        "description": "1-based line number to start reading from. Defaults to 1. Use a heading's line number to jump directly to that section. Only used when view=\"full\"."
       },
       "limit": {
         "type": "integer",
         "minimum": 1,
         "default": 2000,
-        "description": "Maximum number of lines to return from the offset. Defaults to 2000."
+        "description": "Maximum number of lines to return from the offset. Defaults to 2000. Only used when view=\"full\"."
       }
     },
     "required": ["url"]
@@ -552,11 +558,14 @@ Result:
 }
 ```
 
-**Navigation workflow**: Call `read_page` with just the URL to get the heading map and the first 2000 lines. Inspect headings to find the section you need. Call again with `offset` set to that heading's line number to jump there.
+**Navigation workflow**:
+1. Call with `view="headings"` to inspect the page structure without fetching content.
+2. Find the heading closest to the section you need and note its line number.
+3. Call again with `view="full"` and `offset=<that line number>` to read the section.
+
+For short pages or when you need the full content in one call, omit `view` (defaults to `"full"`).
 
 ### 4.2 Output Schema
-
-**Output schema**:
 
 ```json
 {
@@ -568,11 +577,11 @@ Result:
     },
     "headings": {
       "type": "string",
-      "description": "Plain-text heading map of the full page (always complete, regardless of offset/limit). Each line is formatted as '<line_number>: <heading line>' where line_number is 1-based. Only lines containing markdown headings (H1–H4) are included."
+      "description": "Plain-text heading map of the full page (always complete, regardless of view/offset/limit). Each line is formatted as '<line_number>: <heading line>' where line_number is 1-based. Only H1–H4 markdown headings are included."
     },
     "total_lines": {
       "type": "integer",
-      "description": "Total number of lines in the full page. Useful for determining if more content exists beyond the current window."
+      "description": "Total number of lines in the full page. Always present. If offset + limit < total_lines there is content beyond the current window."
     },
     "offset": {
       "type": "integer",
@@ -584,26 +593,26 @@ Result:
     },
     "content": {
       "type": "string",
-      "description": "Page markdown for the requested window (from offset, up to limit lines). May be shorter than limit if the page ends before the window fills."
+      "description": "Page markdown for the requested window (from offset, up to limit lines). Present only when view=\"full\". Absent when view=\"headings\"."
     },
     "cached": { "type": "boolean" },
     "cached_at": { "type": ["string", "null"], "format": "date-time" },
     "stale": { "type": "boolean" }
   },
-  "required": ["url", "headings", "total_lines", "offset", "limit", "content", "cached", "cached_at", "stale"]
+  "required": ["url", "headings", "total_lines", "offset", "limit", "cached", "cached_at", "stale"]
 }
 ```
 
-**Headings**: Always reflect the full page, regardless of the `offset`/`limit` window. This allows the agent to navigate the complete page structure from any position. Headings and full content are cached together so subsequent calls with different offsets don't re-fetch or re-parse.
+**Headings**: Always reflect the full page regardless of `view`, `offset`, or `limit`. Headings and full content are cached together so subsequent calls with different views or offsets don't re-fetch.
 
 ### 4.3 Examples
 
-**First fetch (defaults)**:
+**Scan structure only (`view="headings"`)**:
 
 Request arguments:
 
 ```json
-{ "url": "https://docs.langchain.com/docs/concepts/streaming.md" }
+{ "url": "https://docs.langchain.com/docs/concepts/streaming.md", "view": "headings" }
 ```
 
 Result:
@@ -615,14 +624,13 @@ Result:
   "total_lines": 42,
   "offset": 1,
   "limit": 2000,
-  "content": "# Streaming\n\n## Overview\n\nLangChain supports streaming...\n\n## Streaming with Chat Models\n...",
   "cached": false,
   "cached_at": null,
   "stale": false
 }
 ```
 
-**Jump to a section using offset**:
+**Jump to a section using offset (`view="full"`, default)**:
 
 Request arguments:
 
@@ -646,7 +654,7 @@ Result:
 }
 ```
 
-Note: `headings` is identical in both responses — it always covers the full page.
+Note: `headings` is identical across all responses for the same URL — it always covers the full page.
 
 ### 4.4 Error Cases
 
@@ -660,6 +668,7 @@ Note: `headings` is identical in both responses — it always covers the full pa
 | Redirect leads to non-allowlisted domain | `URL_NOT_ALLOWED`   | `false`       |
 | URL over 2048 characters                 | `INVALID_INPUT`     | `false`       |
 | `offset` < 1 or `limit` < 1             | `INVALID_INPUT`     | `false`       |
+| `view` not `"full"` or `"headings"`      | `INVALID_INPUT`     | `false`       |
 
 **`URL_NOT_ALLOWED` example**:
 

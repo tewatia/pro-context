@@ -10,18 +10,16 @@ Responsibilities (and nothing more):
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import sys
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import aiosqlite
 import structlog
 from mcp.server.fastmcp import Context, FastMCP
-from mcp.types import CallToolResult, TextContent
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 import procontext.tools.get_library_docs as t_get_docs
 import procontext.tools.read_page as t_read_page
@@ -29,8 +27,8 @@ import procontext.tools.resolve_library as t_resolve
 from procontext import __version__
 from procontext.cache import Cache
 from procontext.config import Settings
-from procontext.errors import ProContextError
 from procontext.fetcher import Fetcher, build_allowlist, build_http_client
+from procontext.models.tools import GetLibraryDocsOutput, ReadPageOutput, ResolveLibraryOutput
 from procontext.registry import build_indexes, fetch_registry_for_setup, load_registry
 from procontext.schedulers import (
     run_cache_cleanup_scheduler,
@@ -192,77 +190,87 @@ mcp = FastMCP("procontext", lifespan=lifespan)
 mcp._mcp_server.version = __version__  # pyright: ignore[reportPrivateUsage]
 
 
-def _serialise_tool_error(error: ProContextError) -> CallToolResult:
-    """Convert a ProContextError to the MCP tool error result envelope."""
-    return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(error.to_dict()))],
-        isError=True,
-    )
-
-
 @mcp.tool()
-async def resolve_library(query: str, ctx: Context) -> object:
-    """Resolve a library name or package name to a known documentation source."""
-    state: AppState = ctx.request_context.lifespan_context
-    try:
-        return await t_resolve.handle(query, state)
-    except ProContextError as exc:
-        log.warning(
-            "tool_error",
-            tool="resolve_library",
-            code=exc.code,
-            message=exc.message,
-            recoverable=exc.recoverable,
-        )
-        return _serialise_tool_error(exc)
-    except Exception:
-        log.error("tool_unexpected_error", tool="resolve_library", exc_info=True)
-        raise
+async def resolve_library(
+    query: Annotated[
+        str,
+        Field(description="Library name, package specifier (e.g. 'langchain>=0.2'), or alias."),
+    ],
+    ctx: Context,
+) -> ResolveLibraryOutput:
+    """Resolve a library name to its documentation source.
 
-
-@mcp.tool()
-async def get_library_docs(library_id: str, ctx: Context) -> object:
-    """Fetch the llms.txt table of contents for a library."""
-    state: AppState = ctx.request_context.lifespan_context
-    try:
-        return await t_get_docs.handle(library_id, state)
-    except ProContextError as exc:
-        log.warning(
-            "tool_error",
-            tool="get_library_docs",
-            code=exc.code,
-            message=exc.message,
-            recoverable=exc.recoverable,
-        )
-        return _serialise_tool_error(exc)
-    except Exception:
-        log.error("tool_unexpected_error", tool="get_library_docs", exc_info=True)
-        raise
-
-
-@mcp.tool()
-async def read_page(url: str, ctx: Context, offset: int = 1, limit: int = 2000) -> object:
-    """Fetch the content of a documentation page.
-
-    Returns a plain-text heading map (line numbers + heading text) for the full
-    page, and a content window controlled by offset and limit. Use headings to
-    find sections, then call again with offset to jump directly to them.
+    Returns a ranked list of matches. Pass the library_id from the top match
+    to get_library_docs.
     """
     state: AppState = ctx.request_context.lifespan_context
-    try:
-        return await t_read_page.handle(url, offset, limit, state)
-    except ProContextError as exc:
-        log.warning(
-            "tool_error",
-            tool="read_page",
-            code=exc.code,
-            message=exc.message,
-            recoverable=exc.recoverable,
-        )
-        return _serialise_tool_error(exc)
-    except Exception:
-        log.error("tool_unexpected_error", tool="read_page", exc_info=True)
-        raise
+    return ResolveLibraryOutput.model_validate(await t_resolve.handle(query, state))
+
+
+@mcp.tool()
+async def get_library_docs(
+    library_id: Annotated[
+        str,
+        Field(description="Library ID from resolve_library. Use the library_id of the best match."),
+    ],
+    ctx: Context,
+) -> GetLibraryDocsOutput:
+    """Fetch the llms.txt table of contents for a library.
+
+    Returns a structured index of documentation pages with titles and URLs.
+    Use the page URLs as input to read_page.
+
+    stale=true means the content was served from an expired cache entry and
+    is being refreshed in the background; it is still usable.
+    """
+    state: AppState = ctx.request_context.lifespan_context
+    return GetLibraryDocsOutput.model_validate(await t_get_docs.handle(library_id, state))
+
+
+@mcp.tool()
+async def read_page(
+    url: Annotated[
+        str,
+        Field(description="Documentation page URL from get_library_docs."),
+    ],
+    ctx: Context,
+    offset: Annotated[
+        int,
+        Field(description="1-based line number to start reading from.", ge=1),
+    ] = 1,
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of content lines to return.", ge=1),
+    ] = 2000,
+    view: Annotated[
+        Literal["headings", "full"],
+        Field(
+            description=(
+                "headings: returns heading map and total_lines only, no page content. "
+                "full: returns heading map plus content window."
+            )
+        ),
+    ] = "full",
+) -> ReadPageOutput:
+    """Fetch a documentation page from a URL returned by get_library_docs.
+
+    The heading map lists every H1–H4 heading with its 1-based line number.
+    total_lines is always present. If offset + limit < total_lines, call again
+    with a higher offset to read more content.
+    Repeated calls on the same URL are served from cache (sub-100ms).
+
+    Navigation patterns:
+      Single page — call with view="full", use heading line numbers with
+      offset to jump to specific sections, increment offset to read further chunks.
+
+      Multiple candidate pages — call view="headings" across pages from
+      get_library_docs to compare structure cheaply before committing to
+      a full read.
+    """
+    state: AppState = ctx.request_context.lifespan_context
+    return ReadPageOutput.model_validate(
+        await t_read_page.handle(url, offset, limit, state, view=view)
+    )
 
 
 # ---------------------------------------------------------------------------

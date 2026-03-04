@@ -17,9 +17,8 @@ class ErrorCode(StrEnum):
 class ProContextError(Exception):
     """Raised by tool handlers for all expected failure conditions.
 
-    Caught by server.py and serialised into the MCP error response.
-    Never catch this inside business logic — let it propagate to the
-    MCP layer so the agent receives a structured error with a suggestion.
+    Propagates to FastMCP which converts it to an isError=True tool result.
+    Never catch this inside business logic.
     """
 
     def __init__(
@@ -29,18 +28,8 @@ class ProContextError(Exception):
         suggestion: str,
         recoverable: bool = False,
     ) -> None:
-        super().__init__(message)
+        super().__init__(f"{code}: {message}. {suggestion}")
         self.code = code
         self.message = message
         self.suggestion = suggestion
         self.recoverable = recoverable
-
-    def to_dict(self) -> dict:
-        return {
-            "error": {
-                "code": self.code,
-                "message": self.message,
-                "suggestion": self.suggestion,
-                "recoverable": self.recoverable,
-            }
-        }

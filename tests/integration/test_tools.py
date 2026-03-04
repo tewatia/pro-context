@@ -395,3 +395,39 @@ class TestReadPageHandler:
         assert result["content"] == ""
         assert result["total_lines"] == 21
         assert result["headings"] != ""  # Headings still present
+
+    @respx.mock
+    async def test_view_headings_omits_content(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_page_handle(_SAMPLE_URL, 1, 2000, app_state, view="headings")
+
+        assert "content" not in result
+        assert "headings" in result
+        assert "total_lines" in result
+        assert "# Streaming" in result["headings"]
+
+    @respx.mock
+    async def test_view_headings_total_lines_correct(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_page_handle(_SAMPLE_URL, 1, 2000, app_state, view="headings")
+
+        assert result["total_lines"] == len(_SAMPLE_PAGE.splitlines())
+
+    @respx.mock
+    async def test_view_full_explicit_returns_content(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_page_handle(_SAMPLE_URL, 1, 2000, app_state, view="full")
+
+        assert "content" in result
+        assert "# Streaming" in result["content"]
+
+    @respx.mock
+    async def test_view_default_is_full(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_page_handle(_SAMPLE_URL, 1, 2000, app_state)
+
+        assert "content" in result

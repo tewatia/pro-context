@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from procontext.models.registry import LibraryMatch
 
@@ -23,7 +24,9 @@ class ResolveLibraryInput(BaseModel):
 
 
 class ResolveLibraryOutput(BaseModel):
-    matches: list[LibraryMatch]
+    matches: list[LibraryMatch] = Field(
+        description="Ranked list of matching libraries, sorted by relevance descending."
+    )
 
 
 class GetLibraryDocsInput(BaseModel):
@@ -39,18 +42,26 @@ class GetLibraryDocsInput(BaseModel):
 
 
 class GetLibraryDocsOutput(BaseModel):
-    library_id: str
-    name: str
-    content: str  # Raw llms.txt markdown
-    cached: bool
-    cached_at: datetime | None
-    stale: bool = False
+    library_id: str = Field(description="Canonical library ID.")
+    name: str = Field(description="Human-readable library name.")
+    content: str = Field(
+        description="Raw llms.txt markdown — index of documentation pages with titles and URLs."
+    )
+    cached: bool = Field(description="True if served from cache.")
+    cached_at: datetime | None = Field(
+        description="When this content was last fetched. Null for fresh network fetches."
+    )
+    stale: bool = Field(
+        default=False,
+        description="True if cache entry is expired; a background refresh is already in progress.",
+    )
 
 
 class ReadPageInput(BaseModel):
     url: str
     offset: int = 1
     limit: int = 2000
+    view: Literal["headings", "full"] = "full"
 
     @field_validator("url")
     @classmethod
@@ -78,12 +89,22 @@ class ReadPageInput(BaseModel):
 
 
 class ReadPageOutput(BaseModel):
-    url: str
-    headings: str  # Plain-text heading map: "<line>: <heading>\n..."
-    total_lines: int
-    offset: int
-    limit: int
-    content: str  # Page markdown for the requested window
-    cached: bool
-    cached_at: datetime | None
-    stale: bool = False
+    url: str = Field(description="The URL of the fetched page.")
+    headings: str = Field(
+        description='H1–H4 headings with 1-based line numbers, e.g. "1: # Title\\n42: ## Usage".'
+    )
+    total_lines: int = Field(description="Total number of lines in the full page.")
+    offset: int = Field(description="1-based line number where the content window starts.")
+    limit: int = Field(description="Maximum number of lines in the content window.")
+    content: str | None = Field(
+        default=None,
+        description="Content window lines. Present when view='full'; absent when view='headings'.",
+    )
+    cached: bool = Field(description="True if served from cache.")
+    cached_at: datetime | None = Field(
+        description="When this page was last fetched. Null for fresh network fetches."
+    )
+    stale: bool = Field(
+        default=False,
+        description="True if cache entry is expired; a background refresh is already in progress.",
+    )

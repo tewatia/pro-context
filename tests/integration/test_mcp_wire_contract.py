@@ -205,6 +205,16 @@ def test_initialize_and_tools_list_contract(subprocess_env: dict[str, str]) -> N
     assert read_page_schema["properties"]["offset"]["type"] == "integer"
     assert read_page_schema["properties"]["limit"]["type"] == "integer"
 
+    # Each tool must advertise its outputSchema.
+    for tool_name in ("resolve_library", "get_library_docs", "read_page"):
+        tool = tools_by_name[tool_name]
+        assert "outputSchema" in tool, f"{tool_name} missing outputSchema"
+        assert tool["outputSchema"]["type"] == "object"
+
+    assert "matches" in tools_by_name["resolve_library"]["outputSchema"]["properties"]
+    assert "library_id" in tools_by_name["get_library_docs"]["outputSchema"]["properties"]
+    assert "headings" in tools_by_name["read_page"]["outputSchema"]["properties"]
+
 
 def test_resolve_library_wire_success(subprocess_env: dict[str, str]) -> None:
     responses = _run_mcp_exchange(
@@ -317,9 +327,8 @@ def test_read_page_wire_error_envelope(subprocess_env: dict[str, str]) -> None:
     tool_response = next(response for response in responses if response.get("id") == 2)
     assert tool_response["result"]["isError"] is True
 
-    payload = json.loads(tool_response["result"]["content"][0]["text"])
-    assert payload["error"]["code"] == "URL_NOT_ALLOWED"
-    assert payload["error"]["recoverable"] is False
+    text = tool_response["result"]["content"][0]["text"]
+    assert "URL_NOT_ALLOWED" in text
 
 
 def test_get_library_docs_wire_success_from_cache(
@@ -407,9 +416,8 @@ def test_get_library_docs_wire_error_envelope(subprocess_env: dict[str, str]) ->
     tool_response = next(response for response in responses if response.get("id") == 2)
     assert tool_response["result"]["isError"] is True
 
-    payload = json.loads(tool_response["result"]["content"][0]["text"])
-    assert payload["error"]["code"] == "LIBRARY_NOT_FOUND"
-    assert payload["error"]["recoverable"] is False
+    text = tool_response["result"]["content"][0]["text"]
+    assert "LIBRARY_NOT_FOUND" in text
 
 
 def test_server_exits_cleanly_when_registry_missing(tmp_path: Path) -> None:
