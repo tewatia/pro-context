@@ -211,7 +211,15 @@ Enterprise consumers increasingly require provenance. Its absence is an adoption
 
 ## Maintainability
 
-### 23. Minimize runtime dependencies
+### 24. Keep files small and focused
+
+A file should own one concern. If the module docstring requires more than one sentence to summarize all responsibilities, that is a signal to split the file.
+
+A useful heuristic: if you cannot understand what a file does without scrolling through it, it is doing too much. Aim for files where the purpose is obvious from the filename alone.
+
+Prefer flat files for single-concern modules — a subdirectory only earns its place when two or more closely related files belong together and would be confusing in isolation.
+
+### 25. Minimize runtime dependencies
 
 Zero dependencies is ideal. When that is not practical, justify every runtime dependency. Each one has an ongoing cost:
 

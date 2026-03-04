@@ -329,7 +329,7 @@ These four indexes serve all `resolve_library` lookups. No database reads during
 All documentation is fetched via plain HTTP GET. ProContext uses `httpx` with:
 
 - Manual redirect handling (each redirect target is validated against the SSRF allowlist before following)
-- Configurable request timeout (default: 30 seconds; see `fetcher.request_timeout_seconds`)
+- Configurable connect timeout (default: 5 seconds) and read timeout (default: 30 seconds); see `fetcher.connect_timeout_seconds` and `fetcher.request_timeout_seconds`
 - Maximum 3 redirect hops
 
 ### Cache

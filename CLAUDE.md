@@ -77,11 +77,11 @@ uv run pytest
 **Logging**
 
 - Use structlog for all runtime logging - never the stdlib `logging` module directly, and never `print()` without `file=sys.stderr`.
-- In stdio MCP mode, stdout is owned by the MCP JSON-RPC stream. Any writes to stdout will corrupt the protocol. Logs must always go to stderr. `structlog.PrintLoggerFactory(file=sys.stderr)` is already configured in `server.py`.
+- In stdio MCP mode, stdout is owned by the MCP JSON-RPC stream. Any writes to stdout will corrupt the protocol. Logs must always go to stderr. `structlog.PrintLoggerFactory(file=sys.stderr)` is configured in `logging_config.py`.
 
 **Platform-aware paths**
 
-- All filesystem defaults use `platformdirs` - never hardcode Unix paths like `~/.local/share/` or `~/.config/`. Use `platformdirs.user_config_dir("procontext")` in `config.py` and `platformdirs.user_data_dir("procontext")` for data. Registry paths derive from `settings.data_dir` via `server.py:_registry_paths()`.
+- All filesystem defaults use `platformdirs` - never hardcode Unix paths like `~/.local/share/` or `~/.config/`. Use `platformdirs.user_config_dir("procontext")` in `config.py` and `platformdirs.user_data_dir("procontext")` for data. Registry paths derive from `settings.data_dir` via `mcp/lifespan.py:registry_paths()`.
 
 **Annotations and TYPE_CHECKING**
 

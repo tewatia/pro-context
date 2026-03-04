@@ -48,11 +48,16 @@ procontext/
 │   └── procontext/
 │       ├── __init__.py               # package __version__ (resolved from installed metadata)
 │       ├── py.typed                  # PEP 561 marker — declares this package is typed
-│       ├── server.py                 # FastMCP instance, lifespan, tool registration, entrypoint
+│       ├── mcp/                      # MCP server wiring
+│       │   ├── __init__.py
+│       │   ├── server.py             # FastMCP instance and tool registrations
+│       │   ├── lifespan.py           # asynccontextmanager: resource creation/teardown, registry_paths()
+│       │   └── startup.py            # main(), CLI entry point, registry bootstrap
 │       ├── state.py                  # AppState dataclass
 │       ├── config.py                 # Settings via pydantic-settings + YAML
 │       ├── errors.py                 # ErrorCode, ProContextError
 │       ├── protocols.py              # CacheProtocol, FetcherProtocol (typing.Protocol)
+│       ├── logging_config.py         # structlog processor chain configuration
 │       ├── models/
 │       │   ├── __init__.py           # Re-exports all public models
 │       │   ├── registry.py           # RegistryEntry, RegistryPackages, LibraryMatch
@@ -68,7 +73,7 @@ procontext/
 │       ├── fetcher.py                # HTTP client, SSRF validation, redirect handling
 │       ├── cache.py                  # SQLite cache: toc_cache + page_cache, stale-while-revalidate
 │       ├── schedulers.py             # Background coroutines: registry update scheduler, cache cleanup scheduler
-│       ├── parser.py                 # Heading parser, code block suppression, line number tracking
+│       ├── parser.py                 # Outline parser, code block suppression, line number tracking
 │       ├── transport.py              # MCPSecurityMiddleware for HTTP mode
 │       └── data/
 │           └── __init__.py           # Package marker (data/ has no runtime-loaded files)
@@ -96,13 +101,13 @@ The structure enforces a strict layering. Violations (e.g., a tool importing fro
 
 | Layer              | Modules                                              | Rule                                                                                   |
 | ------------------ | ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| **Entrypoint**     | `server.py`                                          | Registers tools, wires `AppState`, starts transport. No business logic.                |
+| **Entrypoint**     | `mcp/server.py`, `mcp/lifespan.py`, `mcp/startup.py` | Tool registrations, resource lifecycle, CLI entry. No business logic.                 |
 | **Tools**          | `tools/*.py`                                         | One file per tool. Receives `AppState`, returns output dict. Raises `ProContextError`. |
 | **Services**       | `resolver.py`, `fetcher.py`, `cache.py`, `parser.py` | Pure business logic. No MCP imports. Typed against protocols, not concrete classes.    |
 | **Infrastructure** | `registry.py`, `config.py`, `transport.py`, `schedulers.py` | Setup and wiring. Run once at startup; schedulers run as long-lived background coroutines. |
 | **Shared**         | `models/`, `errors.py`, `protocols.py`, `state.py`   | No dependencies on other layers. Imported freely.                                      |
 
-**Adding a new tool**: Create `tools/new_tool.py`, register it in `server.py`. No other files change.
+**Adding a new tool**: Create `tools/new_tool.py`, register it in `mcp/server.py`. No other files change.
 
 **Swapping the cache backend**: Provide a new class implementing `CacheProtocol`, inject it into `AppState`. No tool code changes.
 
@@ -140,7 +145,7 @@ dependencies = [
 ]
 
 [project.scripts]
-procontext = "procontext.server:main"
+procontext = "procontext.mcp.startup:main"
 
 [dependency-groups]
 dev = [
@@ -312,7 +317,7 @@ class AppState:
 `AppState` is passed into the server via FastMCP's lifespan context and flows into tool handlers through the MCP `Context` object:
 
 ```python
-# server.py
+# mcp/lifespan.py + mcp/server.py
 from contextlib import asynccontextmanager
 from mcp.server.fastmcp import FastMCP, Context
 
@@ -340,7 +345,7 @@ async def handle(query: str, state: AppState) -> dict:
 
 ### 3.4 Error Handling
 
-**Raise `ProContextError`, never return error dicts.** Tool handlers raise `ProContextError`. `server.py` catches it and serialises it into the MCP error response. Business logic modules never return `{"error": ...}` dicts.
+**Raise `ProContextError`, never return error dicts.** Tool handlers raise `ProContextError`. `mcp/server.py` catches it and serialises it into the MCP error response. Business logic modules never return `{"error": ...}` dicts.
 
 ```python
 # Correct
@@ -362,7 +367,7 @@ if not entry:
 **Bind log context at the start of each handler.** Use `structlog.get_logger().bind(...)` to attach the tool name and key inputs to every log line in a handler, without passing a logger argument through every function call.
 
 ```python
-# tools/get_library_docs.py
+# tools/get_library_docs.py  (file is named get_library_docs.py; tool exposed as get_library_index)
 import structlog
 
 async def handle(library_id: str, state: AppState) -> dict:
@@ -429,7 +434,9 @@ Each phase produces working, tested code. Later phases build on earlier ones wit
 | `src/procontext/config.py`          | `Settings` with all fields and YAML loading                                              |
 | `src/procontext/state.py`           | `AppState` dataclass (fields populated across phases)                                    |
 | `src/procontext/protocols.py`       | `CacheProtocol`, `FetcherProtocol` stubs                                                 |
-| `src/procontext/server.py`          | `FastMCP("procontext")`, lifespan stub, `main()` entrypoint                              |
+| `src/procontext/mcp/server.py`      | `FastMCP("procontext")`, tool registrations                                              |
+| `src/procontext/mcp/lifespan.py`    | lifespan stub, `registry_paths()`                                                        |
+| `src/procontext/mcp/startup.py`     | `main()` entrypoint, registry bootstrap                                                  |
 | `procontext.example.yaml`           | Example config with all fields and comments (committed; `procontext.yaml` is gitignored) |
 
 **Verification**:
@@ -459,7 +466,7 @@ echo '{}' | uv run procontext  # Responds without crash
 | `src/procontext/tools/__init__.py`         | Empty                                                            |
 | `src/procontext/tools/resolve_library.py`  | `handle(query, state) -> dict`                                   |
 | `src/procontext/state.py`                  | Add `indexes`, `registry_version` fields                         |
-| `src/procontext/server.py`                 | Register `resolve_library` tool, initialise registry in lifespan |
+| `src/procontext/mcp/server.py`             | Register `resolve_library` tool, initialise registry in lifespan |
 | `src/procontext/data/__init__.py`           | Package marker — the `data/` directory has no runtime-loaded files |
 | `tests/unit/test_resolver.py`              | See testing section                                              |
 
@@ -487,9 +494,9 @@ echo '{}' | uv run procontext  # Responds without crash
 | `src/procontext/models/cache.py`           | `TocCacheEntry`, `PageCacheEntry`                                                                          |
 | `src/procontext/models/tools.py`           | Add `GetLibraryIndexInput`, `GetLibraryIndexOutput`                                                          |
 | `src/procontext/models/__init__.py`        | Re-export new models                                                                                       |
-| `src/procontext/tools/get_library_docs.py` | `handle(library_id, state) -> dict`                                                                        |
+| `src/procontext/tools/get_library_docs.py` | `handle(library_id, state) -> dict` (tool name: `get_library_index`)                                       |
 | `src/procontext/state.py`                  | Add `http_client`, `cache`, `fetcher`, `allowlist` fields                                                  |
-| `src/procontext/server.py`                 | Register `get_library_index` tool, initialise `Cache` and `Fetcher` in lifespan                             |
+| `src/procontext/mcp/server.py`             | Register `get_library_index` tool, initialise `Cache` and `Fetcher` in lifespan                             |
 | `tests/unit/test_fetcher.py`               | See testing section                                                                                        |
 | `tests/unit/test_cache.py`                 | See testing section                                                                                        |
 
@@ -516,7 +523,7 @@ echo '{}' | uv run procontext  # Responds without crash
 | ----------------------------------- | ---------------------------------------------------------------------------- |
 | `src/procontext/parser.py`          | `parse_outline()` — returns plain-text structural outline                    |
 | `src/procontext/tools/read_page.py` | `handle(url, offset, limit, state) -> dict`                                  |
-| `src/procontext/server.py`          | Register `read_page` tool                                                    |
+| `src/procontext/mcp/server.py`      | Register `read_page` tool                                                    |
 | `tests/unit/test_parser.py`         | See testing section                                                          |
 | `tests/integration/test_tools.py`   | End-to-end tool call tests for all three tools                               |
 
@@ -545,7 +552,7 @@ echo '{}' | uv run procontext  # Responds without crash
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `src/procontext/transport.py`     | `MCPSecurityMiddleware` (bearer key auth, Origin validation, protocol version check)                                          |
 | `src/procontext/config.py`        | Add `auth_enabled` and `auth_key` fields to `ServerSettings`                                                                  |
-| `src/procontext/server.py`        | `run_http_server()`: enforce auth when enabled, auto-generate key when enabled and missing, warn when disabled, start uvicorn |
+| `src/procontext/mcp/startup.py`   | `run_http_server()`: enforce auth when enabled, auto-generate key when enabled and missing, warn when disabled, start uvicorn |
 | `tests/integration/test_tools.py` | Add HTTP mode transport tests                                                                                                 |
 
 **Key behaviours to verify**:
@@ -573,7 +580,7 @@ echo '{}' | uv run procontext  # Responds without crash
 | ------------------------------- | ------------------------------------------------------------------------------- |
 | `src/procontext/registry.py`    | `check_for_registry_update()`, `save_registry_to_disk()` (persist `known-libraries.json` + `registry-state.json`) |
 | `src/procontext/cache.py`       | `cleanup_expired()` called on startup and every 6 hours                         |
-| `src/procontext/server.py`      | Spawn background tasks in lifespan                                              |
+| `src/procontext/mcp/lifespan.py` | Spawn background tasks in lifespan                                             |
 | `CHANGELOG.md`                  | Initial entry for v0.1.0; [Keep a Changelog](https://keepachangelog.com) format |
 | `.github/workflows/ci.yml`      | Full CI pipeline (see Section 6)                                                |
 | `.github/workflows/release.yml` | Release pipeline: version bump, changelog update, PyPI publish (see Section 6)  |

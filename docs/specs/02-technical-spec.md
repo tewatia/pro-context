@@ -30,7 +30,7 @@
 - [6. Cache](#6-cache)
   - [6.1 SQLite Schema](#61-sqlite-schema)
   - [6.2 Stale-While-Revalidate](#62-stale-while-revalidate)
-- [7. Heading Parser](#7-heading-parser)
+- [7. Outline Parser](#7-outline-parser)
   - [7.1 Algorithm](#71-algorithm)
 - [8. Transport Layer](#8-transport-layer)
   - [8.1 stdio Transport](#81-stdio-transport)
@@ -483,10 +483,11 @@ All network I/O goes through a single `Fetcher` instance shared across tool call
 import httpx
 
 def build_http_client(settings: FetcherSettings | None = None) -> httpx.AsyncClient:
-    timeout = settings.request_timeout_seconds if settings is not None else 30.0
+    read_timeout = settings.request_timeout_seconds if settings is not None else 30.0
+    connect_timeout = settings.connect_timeout_seconds if settings is not None else 5.0
     return httpx.AsyncClient(
         follow_redirects=False,       # Manual redirect handling (SSRF requirement)
-        timeout=httpx.Timeout(timeout),
+        timeout=httpx.Timeout(read_timeout, connect=connect_timeout),
         headers={"User-Agent": f"procontext/{__version__}"},
         limits=httpx.Limits(
             max_connections=10,
@@ -561,7 +562,7 @@ def expand_allowlist_from_content(
     regardless of depth configuration. Only mutates ``state.allowlist`` when
     ``settings.fetcher.allowlist_depth >= depth_threshold``.
 
-    Called by get_library_docs with depth_threshold=1 (llms.txt content) and by
+    Called by get_library_index with depth_threshold=1 (llms.txt content) and by
     read_page with depth_threshold=2 (page content).
     """
     discovered_domains = extract_base_domains_from_content(content)
@@ -727,7 +728,7 @@ async def get_toc(self, library_id: str) -> TocCacheEntry | None:
         entry.stale = True
     return entry
 
-# In tools/get_library_docs.py — tool handler launches the background refresh
+# In tools/get_library_docs.py — handler for get_library_index, launches the background refresh
 toc = await state.cache.get_toc(library_id)
 if toc is not None and toc.stale:
     asyncio.create_task(_refresh_toc(state, library_id, llms_txt_url))
@@ -769,9 +770,9 @@ async def set_toc(self, library_id: str, ...) -> None:
 
 ---
 
-## 7. Heading Parser
+## 7. Outline Parser
 
-The heading parser is used exclusively by `read_page`. It produces a plain-text structural map with 1-based line numbers for headings and fenced code block boundaries. Defined in `src/procontext/parser.py`.
+The outline parser is used exclusively by `read_page`. It produces a plain-text structural map with 1-based line numbers for headings and fenced code block boundaries. Defined in `src/procontext/parser.py`.
 
 The output format is a newline-separated string where each line is `<line_number>: <original line>`, e.g.:
 
@@ -830,15 +831,15 @@ for lineno, line in enumerate(content.splitlines(), start=1):
 
 FastMCP handles stdio transport natively. The server runs as a subprocess spawned by the MCP client.
 
-`AppState` is created in a lifespan context manager and flows into tool handlers via FastMCP's `Context` object. Tool business logic lives in `src/procontext/tools/` — `server.py` only registers and dispatches.
+`AppState` is created in a lifespan context manager (`mcp/lifespan.py`) and flows into tool handlers via FastMCP's `Context` object. Tool business logic lives in `src/procontext/tools/` — `mcp/server.py` only registers and dispatches.
 
 ```python
-# src/procontext/server.py
+# src/procontext/mcp/server.py
 from contextlib import asynccontextmanager
 from mcp.server.fastmcp import FastMCP, Context
 from procontext.state import AppState
 import procontext.tools.resolve_library as t_resolve
-import procontext.tools.get_library_docs as t_get_docs
+import procontext.tools.get_library_docs as t_get_docs  # tool exposed as get_library_index
 import procontext.tools.read_page as t_read_page
 
 @asynccontextmanager
@@ -1189,6 +1190,7 @@ fetcher:
   extra_allowed_domains: # always trusted, merged at startup regardless of depth
     - github.com
     - githubusercontent.com
+  connect_timeout_seconds: 5.0 # TCP connection timeout; fail fast so .md probes fall back quickly
   request_timeout_seconds: 30.0 # per-request read timeout for documentation fetches
 
 resolver:
@@ -1233,6 +1235,7 @@ class FetcherSettings(BaseModel):
     ssrf_domain_check: bool = True
     allowlist_depth: Literal[0, 1, 2] = 0
     extra_allowed_domains: list[str] = ["github.com", "githubusercontent.com"]
+    connect_timeout_seconds: float = 5.0
     request_timeout_seconds: float = 30.0
 
 class ResolverSettings(BaseModel):
