@@ -36,7 +36,7 @@ class CacheProtocol(Protocol):
         url: str,
         url_hash: str,
         content: str,
-        headings: str,
+        outline: str,
         ttl_hours: int,
         *,
         discovered_domains: frozenset[str] = frozenset(),

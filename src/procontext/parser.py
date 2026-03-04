@@ -1,11 +1,11 @@
-"""Heading parser for documentation pages.
+"""Page outline parser for documentation pages.
 
-Single-pass algorithm that extracts H1–H4 headings and fenced code block
-boundaries from Markdown content. Outputs a plain-text structural map with
+Single-pass algorithm that extracts H1–H6 headings and fenced code block
+boundaries from Markdown content. Outputs a plain-text outline with
 1-based line numbers for agent navigation via the ``read_page`` tool.
 
 Emitted lines:
-- Heading lines (H1–H4), including those inside fenced code blocks and those
+- Heading lines (H1–H6), including those inside fenced code blocks and those
   prefixed with a blockquote marker (``> ``).
 - Fence opener and closer lines (`` ``` `` / ``~~~``), so the agent can tell
   which headings belong to code block content vs. structural page sections.
@@ -25,7 +25,7 @@ _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _HEADING_RE = re.compile(r"(?:>\s*)?(#{1,6}) .+")
 
 
-def parse_headings(content: str) -> str:
+def parse_outline(content: str) -> str:
     """Extract a plain-text structural map from Markdown content.
 
     Returns one line per heading or fence marker in the format

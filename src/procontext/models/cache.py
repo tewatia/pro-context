@@ -23,7 +23,7 @@ class PageCacheEntry(BaseModel):
     url: str
     url_hash: str  # SHA-256 of url (primary key)
     content: str  # Full page markdown
-    headings: str  # Plain-text heading map: "<line>: <heading>\n..."
+    outline: str  # Plain-text outline: "<line>: <original line>\n..."
     discovered_domains: frozenset[str] = frozenset()  # Base domains found in content
     fetched_at: datetime
     expires_at: datetime

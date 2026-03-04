@@ -153,7 +153,7 @@ class TestPageCache:
             url="https://example.com/docs/page1",
             url_hash="abc123",
             content="# Page 1",
-            headings="1: # Page 1",
+            outline="1: # Page 1",
             ttl_hours=24,
         )
         entry = await cache.get_page("abc123")
@@ -161,7 +161,7 @@ class TestPageCache:
         assert entry.url == "https://example.com/docs/page1"
         assert entry.url_hash == "abc123"
         assert entry.content == "# Page 1"
-        assert entry.headings == "1: # Page 1"
+        assert entry.outline == "1: # Page 1"
         assert entry.stale is False
 
     async def test_get_nonexistent_returns_none(self, cache: Cache) -> None:
@@ -173,7 +173,7 @@ class TestPageCache:
         future = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
         await cache._db.execute(
             "INSERT INTO page_cache "
-            "(url_hash, url, content, headings, discovered_domains, fetched_at, expires_at) "
+            "(url_hash, url, content, outline, discovered_domains, fetched_at, expires_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             ("bad-hash", "https://example.com/page", "Content", "", "", "not-a-date", future),
         )
@@ -187,7 +187,7 @@ class TestPageCache:
             url="https://example.com/docs/old",
             url_hash="old-hash",
             content="Old content",
-            headings="",
+            outline="",
             ttl_hours=0,
         )
         past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
@@ -207,7 +207,7 @@ class TestPageCache:
             url="https://example.com/docs/page1",
             url_hash="h1",
             content="# Page",
-            headings="1: # Page",
+            outline="1: # Page",
             ttl_hours=24,
             discovered_domains=domains,
         )
@@ -220,7 +220,7 @@ class TestPageCache:
             url="https://example.com/docs/page2",
             url_hash="h2",
             content="# Page",
-            headings="",
+            outline="",
             ttl_hours=24,
         )
         entry = await cache.get_page("h2")
@@ -313,7 +313,7 @@ class TestLoadDiscoveredDomains:
             url="https://example.com/page",
             url_hash="h1",
             content="# Page",
-            headings="",
+            outline="",
             ttl_hours=24,
             discovered_domains=frozenset({"foo.com"}),
         )
@@ -332,7 +332,7 @@ class TestLoadDiscoveredDomains:
             url="https://example.com/page",
             url_hash="h1",
             content="# Page",
-            headings="",
+            outline="",
             ttl_hours=24,
             discovered_domains=frozenset({"page.io"}),
         )

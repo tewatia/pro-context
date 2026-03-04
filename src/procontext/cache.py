@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS page_cache (
     url_hash           TEXT PRIMARY KEY,
     url                TEXT NOT NULL UNIQUE,
     content            TEXT NOT NULL,
-    headings           TEXT NOT NULL DEFAULT '',
+    outline           TEXT NOT NULL DEFAULT '',
     discovered_domains TEXT NOT NULL DEFAULT '',
     fetched_at         TEXT NOT NULL,
     expires_at         TEXT NOT NULL
@@ -146,7 +146,7 @@ class Cache:
         """Read a page entry. Returns ``None`` on cache miss or read failure."""
         try:
             cursor = await self._db.execute(
-                "SELECT url_hash, url, content, headings, discovered_domains, "
+                "SELECT url_hash, url, content, outline, discovered_domains, "
                 "fetched_at, expires_at FROM page_cache WHERE url_hash = ?",
                 (url_hash,),
             )
@@ -162,7 +162,7 @@ class Cache:
                 url_hash=row[0],
                 url=row[1],
                 content=row[2],
-                headings=row[3],
+                outline=row[3],
                 discovered_domains=frozenset(row[4].split()),
                 fetched_at=fetched_at,
                 expires_at=expires_at,
@@ -177,7 +177,7 @@ class Cache:
         url: str,
         url_hash: str,
         content: str,
-        headings: str,
+        outline: str,
         ttl_hours: int,
         *,
         discovered_domains: frozenset[str] = frozenset(),
@@ -188,13 +188,13 @@ class Cache:
             expires_at = now + timedelta(hours=ttl_hours)
             await self._db.execute(
                 "INSERT OR REPLACE INTO page_cache "
-                "(url_hash, url, content, headings, discovered_domains, fetched_at, expires_at) "
+                "(url_hash, url, content, outline, discovered_domains, fetched_at, expires_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     url_hash,
                     url,
                     content,
-                    headings,
+                    outline,
                     " ".join(sorted(discovered_domains)),
                     now.isoformat(),
                     expires_at.isoformat(),

@@ -16,7 +16,7 @@ import structlog
 from procontext.errors import ErrorCode, ProContextError
 from procontext.fetcher import expand_allowlist_from_content, is_url_allowed
 from procontext.models.tools import ReadPageInput, ReadPageOutput
-from procontext.parser import parse_headings
+from procontext.parser import parse_outline
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -29,7 +29,7 @@ async def handle(
     offset: int,
     limit: int,
     state: AppState,
-    view: Literal["headings", "full"] = "full",
+    view: Literal["outline", "full"] = "full",
 ) -> dict:
     """Handle a read_page tool call."""
     log = structlog.get_logger().bind(tool="read_page", url=url)
@@ -76,7 +76,7 @@ async def handle(
         return _build_output(
             url=cached_entry.url,
             content=cached_entry.content,
-            headings=cached_entry.headings,
+            outline=cached_entry.outline,
             offset=validated.offset,
             limit=validated.limit,
             view=validated.view,
@@ -98,7 +98,7 @@ async def handle(
         return _build_output(
             url=cached_entry.url,
             content=cached_entry.content,
-            headings=cached_entry.headings,
+            outline=cached_entry.outline,
             offset=validated.offset,
             limit=validated.limit,
             view=validated.view,
@@ -110,7 +110,7 @@ async def handle(
     # Cache miss — fetch from network
     log.info("cache_miss_fetching", url=validated.url)
     content = await state.fetcher.fetch(validated.url, state.allowlist)
-    headings = parse_headings(content)
+    outline = parse_outline(content)
 
     log.info("fetch_complete", content_length=len(content))
 
@@ -123,7 +123,7 @@ async def handle(
         url=validated.url,
         url_hash=url_hash,
         content=content,
-        headings=headings,
+        outline=outline,
         ttl_hours=state.settings.cache.ttl_hours,
         discovered_domains=discovered_domains,
     )
@@ -131,7 +131,7 @@ async def handle(
     return _build_output(
         url=validated.url,
         content=content,
-        headings=headings,
+        outline=outline,
         offset=validated.offset,
         limit=validated.limit,
         view=validated.view,
@@ -145,10 +145,10 @@ def _build_output(
     *,
     url: str,
     content: str,
-    headings: str,
+    outline: str,
     offset: int,
     limit: int,
-    view: Literal["headings", "full"],
+    view: Literal["outline", "full"],
     cached: bool,
     cached_at: datetime | None,
     stale: bool,
@@ -157,7 +157,7 @@ def _build_output(
     all_lines = content.splitlines()
     total_lines = len(all_lines)
 
-    # Window: offset is 1-based. Skipped for headings-only view.
+    # Window: offset is 1-based. Skipped for outline-only view.
     windowed_content: str | None
     if view == "full":
         windowed = all_lines[offset - 1 : offset - 1 + limit]
@@ -167,7 +167,7 @@ def _build_output(
 
     output = ReadPageOutput(
         url=url,
-        headings=headings,
+        outline=outline,
         total_lines=total_lines,
         offset=offset,
         limit=limit,
@@ -177,7 +177,7 @@ def _build_output(
         stale=stale,
     )
     result = output.model_dump(mode="json")
-    # content is intentionally absent in view="headings" responses
+    # content is intentionally absent in view="outline" responses
     if result["content"] is None:
         del result["content"]
     return result
@@ -199,7 +199,7 @@ async def _background_refresh(
             log.warning("stale_refresh_skipped", reason="fetcher_or_cache_not_initialized")
             return
         content = await state.fetcher.fetch(url, state.allowlist)
-        headings = parse_headings(content)
+        outline = parse_outline(content)
 
         discovered_domains = expand_allowlist_from_content(content, state, depth_threshold=2)
 
@@ -207,7 +207,7 @@ async def _background_refresh(
             url=url,
             url_hash=url_hash,
             content=content,
-            headings=headings,
+            outline=outline,
             ttl_hours=state.settings.cache.ttl_hours,
             discovered_domains=discovered_domains,
         )
