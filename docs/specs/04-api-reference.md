@@ -268,10 +268,6 @@ All matching is in-memory. No network calls.
             "items": { "type": "string" },
             "description": "Languages this library supports, e.g. ['python'], ['javascript', 'typescript']."
           },
-          "docs_url": {
-            "type": ["string", "null"],
-            "description": "Primary documentation site URL. Null if not in registry."
-          },
           "matched_via": {
             "type": "string",
             "enum": ["package_name", "library_id", "alias", "fuzzy"],
@@ -288,7 +284,6 @@ All matching is in-memory. No network calls.
           "library_id",
           "name",
           "languages",
-          "docs_url",
           "matched_via",
           "relevance"
         ]
@@ -318,7 +313,6 @@ Result (`text` field, parsed):
       "library_id": "langchain",
       "name": "LangChain",
       "languages": ["python"],
-      "docs_url": "https://docs.langchain.com",
       "matched_via": "package_name",
       "relevance": 1.0
     }
@@ -343,7 +337,6 @@ Result (typo example — `"fasapi"` → `"fastapi"`):
       "library_id": "fastapi",
       "name": "FastAPI",
       "languages": ["python"],
-      "docs_url": "https://fastapi.tiangolo.com",
       "matched_via": "fuzzy",
       "relevance": 0.92
     }
@@ -525,7 +518,7 @@ Result:
 
 ## 4. Tool: read_page
 
-**Purpose**: Fetch a documentation page from a URL returned by `get_library_index`. Returns a structural outline of the full page (H1–H6 headings and fence markers) with 1-based line numbers, and optionally a windowed slice of content. The `view` parameter controls what is returned.
+**Purpose**: Fetch a documentation page from a URL returned by `get_library_index`. Returns a structural outline of the full page (H1–H6 headings and fence markers) with 1-based line numbers, and optionally a windowed slice of content. The `view` parameter controls what is returned. If the URL does not end with `.md`, the server automatically fetches the `.md` variant to ensure markdown content is returned; `PAGE_NOT_FOUND` is raised if the variant does not exist.
 
 ### 4.1 Input Schema
 
@@ -538,7 +531,7 @@ Result:
     "properties": {
       "url": {
         "type": "string",
-        "description": "URL of the documentation page, typically extracted from get_library_index output. Must use http or https. Must be a domain from the library registry.",
+        "description": "URL of the documentation page. Must use http or https. Must be a domain from the library registry. If the URL does not end with .md, the server automatically fetches url+\".md\" to retrieve the markdown version. Raises PAGE_NOT_FOUND if the .md variant does not exist.",
         "maxLength": 2048
       },
       "view": {

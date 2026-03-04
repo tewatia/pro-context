@@ -92,7 +92,6 @@ All matching is against in-memory indexes loaded from the registry at startup. N
       "library_id": "langchain",
       "name": "LangChain",
       "languages": ["python"],
-      "docs_url": "https://docs.langchain.com",
       "matched_via": "package_name",
       "relevance": 1.0
     }
@@ -105,7 +104,6 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 | `library_id`  | Stable identifier used in all subsequent tool calls                             |
 | `name`        | Human-readable display name                                                     |
 | `languages`   | Languages this library supports                                                 |
-| `docs_url`    | Primary documentation site URL                                                  |
 | `matched_via` | How the match was made: `"package_name"`, `"library_id"`, `"alias"`, `"fuzzy"`  |
 | `relevance`   | 0.0–1.0. Exact matches are 1.0; fuzzy matches are proportional to edit distance |
 
@@ -180,7 +178,7 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 
 1. Validate URL against SSRF allowlist; validate `offset` >= 1, `limit` >= 1
 2. Check SQLite cache for `page:{sha256(url)}` — if fresh, return from cache
-3. On cache miss: HTTP GET the URL, parse outline, store full content + outline in SQLite cache (TTL: 24 hours)
+3. On cache miss: if URL does not already end with `.md`, fetch `url + ".md"` instead. If that returns 404, raise `PAGE_NOT_FOUND` (fail fast — no fallback to the original URL). Store full content + outline in SQLite cache keyed against the original URL.
 4. Build plain-text outline from full page (always complete, regardless of offset/limit)
 5. Slice content to the requested window (`offset`/`limit`)
 6. Return outline, windowed content, and pagination metadata
@@ -369,7 +367,7 @@ A single SQLite database stores all fetched content at `cache.db_path` (default:
 - The allowlist is populated at startup from the registry (all `docs_url` and `llms_txt_url` domains)
 - In HTTP long-running mode, when a background registry update is accepted, the allowlist is rebuilt from the new registry and atomically swapped with the new indexes
 - Redirects are followed manually — each redirect target is re-validated before following
-- Private IP ranges (`10.x`, `172.16.x`, `192.168.x`, `127.x`, `::1`) are always blocked, regardless of allowlist
+- Private IP ranges (`10.x`, `172.16.x`, `192.168.x`, `127.x`, `::1`, `fc00::/7`) are always blocked, regardless of allowlist
 
 ### Input Validation
 

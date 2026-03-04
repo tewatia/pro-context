@@ -433,3 +433,58 @@ class TestReadPageHandler:
         result = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
 
         assert "content" in result
+
+    # --- .md URL probing ---
+
+    @respx.mock
+    async def test_non_md_url_fetches_md_variant(self, app_state: AppState) -> None:
+        """A URL without .md suffix should transparently fetch url+.md."""
+        base_url = "https://python.langchain.com/docs/concepts/streaming"
+        md_url = base_url + ".md"
+        respx.get(md_url).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_page_handle(base_url, 1, 500, app_state)
+
+        assert result["url"] == base_url
+        assert result["cached"] is False
+        assert "# Streaming" in result["content"]
+        # Only the .md variant was requested — original URL must not have been called
+        assert respx.calls.call_count == 1
+        assert str(respx.calls[0].request.url) == md_url
+
+    @respx.mock
+    async def test_non_md_url_cached_under_original_url(self, app_state: AppState) -> None:
+        """Content fetched via .md probing is cached under the original URL."""
+        base_url = "https://python.langchain.com/docs/concepts/streaming"
+        md_url = base_url + ".md"
+        respx.get(md_url).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        # First call — cache miss, network fetch
+        await read_page_handle(base_url, 1, 500, app_state)
+        # Second call — should be a cache hit (no additional network call)
+        result = await read_page_handle(base_url, 1, 500, app_state)
+
+        assert result["cached"] is True
+        assert respx.calls.call_count == 1  # Only one network request total
+
+    @respx.mock
+    async def test_non_md_url_404_raises_page_not_found(self, app_state: AppState) -> None:
+        """If the .md variant returns 404, PAGE_NOT_FOUND is raised immediately."""
+        base_url = "https://python.langchain.com/docs/concepts/streaming"
+        md_url = base_url + ".md"
+        respx.get(md_url).mock(return_value=httpx.Response(404))
+
+        with pytest.raises(ProContextError) as exc_info:
+            await read_page_handle(base_url, 1, 500, app_state)
+
+        assert exc_info.value.code == ErrorCode.PAGE_NOT_FOUND
+
+    @respx.mock
+    async def test_md_url_not_doubled(self, app_state: AppState) -> None:
+        """A URL already ending in .md is fetched as-is without appending another .md."""
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+
+        assert result["cached"] is False
+        assert str(respx.calls[0].request.url) == _SAMPLE_URL
