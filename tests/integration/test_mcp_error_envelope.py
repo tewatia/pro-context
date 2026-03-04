@@ -12,7 +12,7 @@ def test_procontext_error_serializes_to_structured_tool_error(
 ) -> None:
     """ProContextError should be returned as structured JSON in tool result text."""
     proc = subprocess.Popen(
-        [sys.executable, "-m", "procontext.server"],
+        [sys.executable, "-m", "procontext.mcp.startup"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

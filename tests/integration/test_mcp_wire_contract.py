@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 def _run_mcp_exchange(env: dict[str, str], messages: list[dict]) -> list[dict]:
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "procontext.server"],
+        [sys.executable, "-m", "procontext.mcp.startup"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -436,7 +436,7 @@ def test_server_exits_cleanly_when_registry_missing(tmp_path: Path) -> None:
     env["PROCONTEXT__REGISTRY__METADATA_URL"] = "http://127.0.0.1:1/registry_metadata.json"
 
     proc = subprocess.run(
-        [sys.executable, "-m", "procontext.server"],
+        [sys.executable, "-m", "procontext.mcp.startup"],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,

@@ -26,7 +26,7 @@ def _run_and_wait(env: dict[str, str], timeout: int = 10) -> subprocess.Complete
     Suitable for crash scenarios where the server exits before reading any input.
     """
     return subprocess.run(
-        [sys.executable, "-m", "procontext.server"],
+        [sys.executable, "-m", "procontext.mcp.startup"],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -71,7 +71,7 @@ class TestDbPathStartup:
         env = {**subprocess_env, "PROCONTEXT__CACHE__DB_PATH": str(deep_path)}
 
         proc = subprocess.Popen(
-            [sys.executable, "-m", "procontext.server"],
+            [sys.executable, "-m", "procontext.mcp.startup"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
