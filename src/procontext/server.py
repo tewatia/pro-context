@@ -63,7 +63,11 @@ def _setup_logging(settings: Settings) -> None:
     ]
 
     if settings.logging.format == "json":
-        processors = [*shared_processors, structlog.processors.JSONRenderer()]
+        processors = [
+            *shared_processors,
+            structlog.processors.ExceptionRenderer(),
+            structlog.processors.JSONRenderer(),
+        ]
     else:
         processors = [*shared_processors, structlog.dev.ConsoleRenderer()]
 

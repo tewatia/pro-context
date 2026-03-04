@@ -20,7 +20,7 @@ import re
 # 4-space indented lines (indented code blocks) are correctly ignored.
 _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
-# Matches ATX headings H1–H4 on the stripped line.  The optional ``(?:>\s*)?``
+# Matches ATX headings H1–H6 on the stripped line.  The optional ``(?:>\s*)?``
 # prefix handles blockquote headings (``> ## Section``).
 _HEADING_RE = re.compile(r"(?:>\s*)?(#{1,6}) .+")
 

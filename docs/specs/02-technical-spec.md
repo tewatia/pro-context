@@ -179,8 +179,7 @@ class LibraryMatch(BaseModel):
     library_id: str
     name: str
     languages: list[str]
-    docs_url: str | None
-    matched_via: str          # "package_name" | "library_id" | "alias" | "fuzzy"
+    matched_via: Literal["package_name", "library_id", "alias", "fuzzy"]
     relevance: float          # 0.0–1.0
 ```
 
@@ -197,6 +196,7 @@ class TocCacheEntry(BaseModel):
     fetched_at: datetime
     expires_at: datetime
     stale: bool = False
+    discovered_domains: frozenset[str] = frozenset()  # Base domains extracted from content URLs
 
 class PageCacheEntry(BaseModel):
     url: str
@@ -206,6 +206,7 @@ class PageCacheEntry(BaseModel):
     fetched_at: datetime
     expires_at: datetime
     stale: bool = False
+    discovered_domains: frozenset[str] = frozenset()  # Base domains extracted from content URLs
 ```
 
 ### 3.3 Tool Input/Output Models
@@ -242,6 +243,7 @@ class GetLibraryDocsInput(BaseModel):
 class GetLibraryDocsOutput(BaseModel):
     library_id: str
     name: str
+    index_url: str            # Source URL of the llms.txt file
     content: str              # Raw llms.txt markdown
     cached: bool
     cached_at: datetime | None
@@ -308,8 +310,9 @@ class ErrorCode(StrEnum):
 class ProContextError(Exception):
     """Base exception for all ProContext errors.
 
-    Raised by tool handlers and caught by the MCP framework layer,
-    which serialises it into the MCP error response format.
+    Raised by tool handlers. FastMCP catches it automatically and converts
+    it into an MCP tool result with isError=true. No explicit serialisation
+    method is needed — the framework handles the wire format.
     """
     def __init__(
         self,
@@ -323,16 +326,6 @@ class ProContextError(Exception):
         self.message = message
         self.suggestion = suggestion
         self.recoverable = recoverable
-
-    def to_dict(self) -> dict:
-        return {
-            "error": {
-                "code": self.code,
-                "message": self.message,
-                "suggestion": self.suggestion,
-                "recoverable": self.recoverable,
-            }
-        }
 ```
 
 ---
@@ -489,11 +482,12 @@ All network I/O goes through a single `Fetcher` instance shared across tool call
 ```python
 import httpx
 
-def build_http_client() -> httpx.AsyncClient:
+def build_http_client(settings: FetcherSettings | None = None) -> httpx.AsyncClient:
+    timeout = settings.request_timeout_seconds if settings is not None else 30.0
     return httpx.AsyncClient(
         follow_redirects=False,       # Manual redirect handling (SSRF requirement)
-        timeout=httpx.Timeout(30.0),  # 30s total; applies to connect + read
-        headers={"User-Agent": "procontext/1.0"},
+        timeout=httpx.Timeout(timeout),
+        headers={"User-Agent": f"procontext/{__version__}"},
         limits=httpx.Limits(
             max_connections=10,
             max_keepalive_connections=5,
@@ -555,6 +549,29 @@ def extract_base_domains_from_content(content: str) -> frozenset[str]:
             domains.add(_base_domain(hostname))
     return frozenset(domains)
 
+def expand_allowlist_from_content(
+    content: str,
+    state: AppState,
+    *,
+    depth_threshold: int,
+) -> frozenset[str]:
+    """Extract discovered domains from content and optionally expand the live allowlist.
+
+    Always returns the full set of discovered domains for cache persistence,
+    regardless of depth configuration. Only mutates ``state.allowlist`` when
+    ``settings.fetcher.allowlist_depth >= depth_threshold``.
+
+    Called by get_library_docs with depth_threshold=1 (llms.txt content) and by
+    read_page with depth_threshold=2 (page content).
+    """
+    discovered_domains = extract_base_domains_from_content(content)
+    if state.settings.fetcher.allowlist_depth >= depth_threshold:
+        new_domains = discovered_domains - state.allowlist
+        if new_domains:
+            state.allowlist = state.allowlist | new_domains
+            log.info("allowlist_expanded", added_domains=len(new_domains))
+    return discovered_domains
+
 def is_url_allowed(
     url: str,
     allowlist: frozenset[str],
@@ -613,7 +630,12 @@ async def fetch(
     current_url = url
 
     for hop in range(max_redirects + 1):
-        if not is_url_allowed(current_url, allowlist):
+        if not is_url_allowed(
+            current_url,
+            allowlist,
+            check_private_ips=self._settings.ssrf_private_ip_check,
+            check_domain=self._settings.ssrf_domain_check,
+        ):
             raise ProContextError(
                 code=ErrorCode.URL_NOT_ALLOWED,
                 message=f"URL not in allowlist: {current_url}",
@@ -910,17 +932,17 @@ class MCPSecurityMiddleware:
 ```python
 import uvicorn
 
-def run_http_server(settings: Settings) -> None:
-    _setup_logging(settings)
-    log = structlog.get_logger().bind(transport="http")
-    auth_key = settings.server.auth_key or None
+def run_http_server(mcp: FastMCP, settings: Settings) -> None:
+    # Logging is already configured by main() before this is called.
+    http_log = log.bind(transport="http")
+    auth_key: str | None = settings.server.auth_key or None
 
     if settings.server.auth_enabled and not auth_key:
         auth_key = secrets.token_urlsafe(32)
-        log.warning("http_auth_key_auto_generated", auth_key=auth_key)
+        http_log.warning("http_auth_key_auto_generated", auth_key=auth_key)
 
     if not settings.server.auth_enabled:
-        log.warning("http_auth_disabled")
+        http_log.warning("http_auth_disabled")
 
     # mcp.streamable_http_app() returns a Starlette ASGI app with the FastMCP
     # lifespan already wired in.  Wrap it directly — no add_middleware() needed.
@@ -1289,7 +1311,7 @@ async def get_library_index_handler(library_id: str) -> dict:
 | Event                         | Fields                                                                               |
 | ----------------------------- | ------------------------------------------------------------------------------------ |
 | `server_started`              | `transport`, `version`, `registry_entries`, `registry_version`                       |
-| `registry_loaded`             | `version`, `entries`, `source` (`disk`) — `version` comes from `registry-state.json` |
+| `registry_loaded`             | `source` (`disk`), `version`, `entries`, `path` — `version` comes from `registry-state.json` |
 | `registry_updated`            | `version`, `entries`                                                                 |
 | `registry_local_pair_invalid` | `reason`, `path_registry`, `path_state`                                              |
 | `registry_persist_failed`     | `version`, `error`                                                                   |
@@ -1299,7 +1321,7 @@ async def get_library_index_handler(library_id: str) -> dict:
 | `fetch_failed`                | `url`, `error`, `status_code`                                                        |
 | `ssrf_blocked`                | `url`, `reason`                                                                      |
 | `stale_refresh_started`       | `key`                                                                                |
-| `stale_refresh_complete`      | `key`, `changed`                                                                     |
+| `stale_refresh_complete`      | `key`                                                                                |
 | `stale_refresh_failed`        | `key`, `error`                                                                       |
 | `cache_read_error`            | `key`                                                                                |
 | `cache_write_error`           | `key`                                                                                |
