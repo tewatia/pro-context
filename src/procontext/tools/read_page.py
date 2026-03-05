@@ -11,7 +11,7 @@ import asyncio
 import hashlib
 from os.path import splitext
 from typing import TYPE_CHECKING, Literal
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import structlog
 
@@ -113,7 +113,7 @@ async def handle(
     # If the URL has no file extension, try the .md variant first.
     # On any failure (404, timeout, redirect error) fall back to the original URL.
     if not _has_file_extension(validated.url):
-        md_url = validated.url + ".md"
+        md_url = _with_md_extension(validated.url)
         try:
             log.info("cache_miss_fetching", url=md_url)
             content = await state.fetcher.fetch(md_url, state.allowlist)
@@ -153,6 +153,16 @@ async def handle(
         cached_at=None,
         stale=False,
     )
+
+
+def _with_md_extension(url: str) -> str:
+    """Return the URL with .md appended to the path component.
+
+    Appends before any query string or fragment so the server receives the
+    correct path, e.g. ``/docs/page#section`` → ``/docs/page.md#section``.
+    """
+    parsed = urlparse(url)
+    return urlunparse(parsed._replace(path=parsed.path + ".md"))
 
 
 def _has_file_extension(url: str) -> bool:
@@ -227,7 +237,7 @@ async def _background_refresh(
             log.warning("stale_refresh_skipped", reason="fetcher_or_cache_not_initialized")
             return
         if not _has_file_extension(url):
-            md_url = url + ".md"
+            md_url = _with_md_extension(url)
             try:
                 content = await state.fetcher.fetch(md_url, state.allowlist)
             except Exception:

@@ -519,6 +519,26 @@ class TestReadPageHandler:
         assert str(respx.calls[0].request.url) == md_url
 
     @respx.mock
+    async def test_fragment_url_md_probe_correct_path(self, app_state: AppState) -> None:
+        """Fragment in URL must not end up inside the .md extension.
+
+        https://example.com/docs/page#section should probe
+        https://example.com/docs/page.md (fragment stripped by httpx, never sent to server),
+        not https://example.com/docs/page#section.md which would put .md inside the fragment.
+        """
+        base_url = "https://python.langchain.com/docs/concepts/streaming#overview"
+        # httpx strips fragments before sending — the request lands at the path only
+        expected_request_url = "https://python.langchain.com/docs/concepts/streaming.md"
+        respx.get(expected_request_url).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_page_handle(base_url, 1, 500, app_state)
+
+        assert result["cached"] is False
+        assert respx.calls.call_count == 1
+        # .md is in the path, not inside the fragment
+        assert str(respx.calls[0].request.url) == expected_request_url
+
+    @respx.mock
     async def test_html_md_probe_returned_as_is(self, app_state: AppState) -> None:
         """HTML 200 from .md probe is returned as-is — no fallback, since the original
         URL would also return HTML on an SPA (the content is identical either way)."""
