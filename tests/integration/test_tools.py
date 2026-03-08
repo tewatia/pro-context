@@ -554,18 +554,20 @@ class TestReadPageHandler:
         assert respx.calls.call_count == 1  # Only .md was requested, no fallback
 
     @respx.mock
-    async def test_query_string_url_md_probe_correct_path(self, app_state: AppState) -> None:
-        """Query string must be preserved and .md must land in the path, not inside the query."""
-        base_url = "https://python.langchain.com/docs/concepts/streaming?v=latest"
-        # .md goes in the path; query string is preserved
-        expected_request_url = "https://python.langchain.com/docs/concepts/streaming.md?v=latest"
-        respx.get(expected_request_url).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+    async def test_query_string_url_not_probed(self, app_state: AppState) -> None:
+        """A URL with query parameters is fetched as-is — .md probe is skipped.
 
-        result = await read_page_handle(base_url, 1, 500, app_state)
+        Static file servers that serve raw markdown don't use query params,
+        so the probe would always 404. Fetch the original URL directly.
+        """
+        url = "https://python.langchain.com/docs/concepts/streaming?v=latest"
+        respx.get(url).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_page_handle(url, 1, 500, app_state)
 
         assert result["cached"] is False
         assert respx.calls.call_count == 1
-        assert str(respx.calls[0].request.url) == expected_request_url
+        assert str(respx.calls[0].request.url) == url
 
     @respx.mock
     async def test_trailing_slash_url_not_probed(self, app_state: AppState) -> None:

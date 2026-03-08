@@ -112,7 +112,7 @@ async def handle(
     # Cache miss — fetch from network.
     # If the URL has no file extension, try the .md variant first.
     # On any failure (404, timeout, redirect error) fall back to the original URL.
-    if not _has_file_extension(validated.url):
+    if _should_probe_md(validated.url):
         md_url = _with_md_extension(validated.url)
         try:
             log.info("cache_miss_fetching", url=md_url)
@@ -165,24 +165,27 @@ def _with_md_extension(url: str) -> str:
     return urlunparse(parsed._replace(path=parsed.path + ".md"))
 
 
-def _has_file_extension(url: str) -> bool:
-    """Return True if the URL's last path segment has a real file extension.
+def _should_probe_md(url: str) -> bool:
+    """Return True if the URL is a candidate for .md probing.
 
-    Used to decide whether to probe the .md variant — skipped when the URL
-    already has any alphabetic extension (.md, .txt, .html, etc.).
-
-    Returns True (skip probe) for empty last segments — trailing slashes
-    (``/docs/``) or bare domain roots — because appending ``.md`` to an empty
-    segment would corrupt the URL (e.g. ``/docs/.md``).
+    Probing is skipped when:
+    - The URL already has a real alphabetic file extension (.md, .txt, .html, …)
+    - The path ends with a trailing slash or has no path (appending .md would
+      corrupt the URL, e.g. ``/docs/.md``)
+    - The URL has a query string — static file servers that serve raw markdown
+      don't use query parameters, so the probe would always 404
 
     Version segments like ``v1.2`` are NOT treated as extensions because the
     part after the dot is numeric, not alphabetic.
     """
-    last_segment = urlparse(url).path.rsplit("/", 1)[-1]
+    parsed = urlparse(url)
+    if parsed.query:
+        return False  # query params → dynamic server, .md probe won't work
+    last_segment = parsed.path.rsplit("/", 1)[-1]
     if not last_segment:
-        return True  # trailing slash or no path — skip probe
+        return False  # trailing slash or no path — skip probe
     _, ext = splitext(last_segment)
-    return bool(ext) and ext[1:].isalpha()
+    return not (bool(ext) and ext[1:].isalpha())
 
 
 def _build_output(
@@ -242,7 +245,7 @@ async def _background_refresh(
         if state.fetcher is None or state.cache is None:
             log.warning("stale_refresh_skipped", reason="fetcher_or_cache_not_initialized")
             return
-        if not _has_file_extension(url):
+        if _should_probe_md(url):
             md_url = _with_md_extension(url)
             try:
                 content = await state.fetcher.fetch(md_url, state.allowlist)
