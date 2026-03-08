@@ -97,17 +97,15 @@ def extract_base_domains_from_content(content: str) -> frozenset[str]:
 def expand_allowlist_from_content(
     content: str,
     state: AppState,
-    *,
-    depth_threshold: int,
 ) -> frozenset[str]:
     """Extract discovered domains from content and optionally expand the live allowlist.
 
     Always returns the full set of discovered domains for cache persistence,
-    regardless of depth configuration. Only mutates ``state.allowlist`` when
-    ``settings.fetcher.allowlist_depth >= depth_threshold``.
+    regardless of expansion configuration. Only mutates ``state.allowlist`` when
+    ``settings.fetcher.allowlist_expansion == "discovered"``.
     """
     discovered_domains = extract_base_domains_from_content(content)
-    if state.settings.fetcher.allowlist_depth >= depth_threshold:
+    if state.settings.fetcher.allowlist_expansion == "discovered":
         new_domains = discovered_domains - state.allowlist
         if new_domains:
             state.allowlist = state.allowlist | new_domains

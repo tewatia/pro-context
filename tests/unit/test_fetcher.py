@@ -384,8 +384,8 @@ class TestFetcher:
 # ---------------------------------------------------------------------------
 
 
-def _make_state_with_allowlist(allowlist_depth: int, allowlist: frozenset[str]) -> AppState:
-    settings = Settings(fetcher={"allowlist_depth": allowlist_depth})
+def _make_state_with_allowlist(allowlist_expansion: str, allowlist: frozenset[str]) -> AppState:
+    settings = Settings(fetcher={"allowlist_expansion": allowlist_expansion})
     return AppState(
         settings=settings,
         indexes=RegistryIndexes(),
@@ -394,23 +394,27 @@ def _make_state_with_allowlist(allowlist_depth: int, allowlist: frozenset[str]) 
 
 
 class TestExpandAllowlistFromContent:
-    def test_expands_allowlist_when_depth_met(self) -> None:
-        """New domains found in content are added to state.allowlist when depth is met."""
-        state = _make_state_with_allowlist(allowlist_depth=1, allowlist=frozenset({"example.com"}))
+    def test_expands_allowlist_when_discovered(self) -> None:
+        """New domains are added to state.allowlist when expansion is 'discovered'."""
+        state = _make_state_with_allowlist(
+            allowlist_expansion="discovered", allowlist=frozenset({"example.com"})
+        )
         content = "See https://newdocs.io/guide for details."
 
-        discovered = expand_allowlist_from_content(content, state, depth_threshold=1)
+        discovered = expand_allowlist_from_content(content, state)
 
         assert "newdocs.io" in discovered
         assert "newdocs.io" in state.allowlist  # live allowlist was expanded
 
-    def test_returns_domains_but_does_not_expand_when_depth_not_met(self) -> None:
-        """With depth < threshold, discovered domains are returned but allowlist is unchanged."""
-        state = _make_state_with_allowlist(allowlist_depth=0, allowlist=frozenset({"example.com"}))
+    def test_returns_domains_but_does_not_expand_when_registry(self) -> None:
+        """With expansion='registry', discovered domains are returned but allowlist is unchanged."""
+        state = _make_state_with_allowlist(
+            allowlist_expansion="registry", allowlist=frozenset({"example.com"})
+        )
         original_allowlist = state.allowlist
         content = "See https://newdocs.io/guide for details."
 
-        discovered = expand_allowlist_from_content(content, state, depth_threshold=1)
+        discovered = expand_allowlist_from_content(content, state)
 
         assert "newdocs.io" in discovered  # still returned for cache persistence
         assert state.allowlist == original_allowlist  # allowlist is NOT mutated
@@ -418,10 +422,10 @@ class TestExpandAllowlistFromContent:
     def test_no_mutation_when_domain_already_in_allowlist(self) -> None:
         """Domains already in the allowlist leave state.allowlist unchanged."""
         initial = frozenset({"example.com"})
-        state = _make_state_with_allowlist(allowlist_depth=1, allowlist=initial)
+        state = _make_state_with_allowlist(allowlist_expansion="discovered", allowlist=initial)
         content = "See https://example.com/guide for details."
 
-        discovered = expand_allowlist_from_content(content, state, depth_threshold=1)
+        discovered = expand_allowlist_from_content(content, state)
 
         assert "example.com" in discovered
         assert state.allowlist is initial  # same object — no new frozenset was created

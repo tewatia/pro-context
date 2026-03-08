@@ -111,9 +111,8 @@ async def handle(library_id: str, state: AppState) -> dict:
 
     log.info("fetch_complete", content_length=len(content))
 
-    # Always extract discovered domains so they're persisted regardless of depth config.
-    # Whether we expand the live allowlist is controlled by allowlist_depth.
-    discovered_domains = expand_allowlist_from_content(content, state, depth_threshold=1)
+    # Always extract discovered domains so they're persisted regardless of expansion config.
+    discovered_domains = expand_allowlist_from_content(content, state)
 
     # Store in cache (non-fatal on failure — handled inside Cache)
     await state.cache.set_toc(
@@ -153,7 +152,7 @@ async def _background_refresh(
             return
         content = await state.fetcher.fetch(llms_txt_url, state.allowlist)
 
-        discovered_domains = expand_allowlist_from_content(content, state, depth_threshold=1)
+        discovered_domains = expand_allowlist_from_content(content, state)
 
         await state.cache.set_toc(
             library_id=library_id,

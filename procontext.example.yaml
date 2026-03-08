@@ -57,32 +57,29 @@ fetcher:
 
   # Restrict fetching to a known set of trusted domains. When enabled, ProContext only
   # fetches URLs whose base domain appears in the allowed set (built from the registry,
-  # extra_allowed_domains, and any dynamically discovered domains per allowlist_depth).
+  # extra_allowed_domains, and any dynamically discovered domains per allowlist_expansion).
   # Set to false to allow fetching from any domain — only appropriate in fully isolated
   # or air-gapped environments where all reachable hosts are trusted.
   ssrf_domain_check: true
 
-  # Controls how far beyond the registry the domain allowlist is expanded at runtime.
+  # Controls whether the domain allowlist is expanded at runtime beyond the registry.
   # Has no effect when ssrf_domain_check is false.
   #
-  #   0 — Registry only (default, strictest)
+  #   "registry" — Registry only (default, strictest)
   #         Only domains explicitly listed in the ProContext registry are trusted
   #         (extracted from docs_url and llms_txt_url of each registry entry).
   #         Use this if you want tight control over what ProContext can reach.
   #
-  #   1 — Registry + URLs listed inside llms.txt
-  #         After fetching a library's llms.txt, any URLs found in that file have
-  #         their base domains added to the allowlist. Useful when a library's docs
-  #         span multiple domains not all covered by the registry entry.
-  #
-  #   2 — Registry + llms.txt URLs + URLs inside fetched pages
-  #         Additionally, any URLs found within documentation pages fetched via
-  #         read_page are also trusted. Allows following cross-references to domains
-  #         not in the registry. Note: in long-running HTTP mode the allowlist grows
-  #         as more pages are read and resets only when the registry is updated.
-  allowlist_depth: 0
+  #   "discovered" — Registry + domains found in fetched content
+  #         After read_page or search_page fetches any content, all URLs found in
+  #         that content have their base domains added to the allowlist. Enables
+  #         following cross-domain links found in documentation. The allowlist is
+  #         monotonic (domains are only added, never removed) and resets to the
+  #         registry baseline on each registry update. In long-running HTTP mode
+  #         it may grow across sessions until the next registry update.
+  allowlist_expansion: "registry"
 
-  # Additional domains to always trust, regardless of allowlist_depth. These are merged
+  # Additional domains to always trust, regardless of allowlist_expansion. These are merged
   # with the registry-derived allowlist at startup and persist across registry updates.
   #
   # ProContext matches on base domain (last two DNS labels), so adding a shared hosting

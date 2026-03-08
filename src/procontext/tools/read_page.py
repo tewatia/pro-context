@@ -128,9 +128,8 @@ async def handle(
 
     log.info("fetch_complete", content_length=len(content))
 
-    # Always extract discovered domains so they're persisted regardless of depth config.
-    # Whether we expand the live allowlist is controlled by allowlist_depth.
-    discovered_domains = expand_allowlist_from_content(content, state, depth_threshold=2)
+    # Always extract discovered domains so they're persisted regardless of expansion config.
+    discovered_domains = expand_allowlist_from_content(content, state)
 
     # Store in cache (non-fatal on failure — handled inside Cache)
     await state.cache.set_page(
@@ -256,7 +255,7 @@ async def _background_refresh(
             content = await state.fetcher.fetch(url, state.allowlist)
         outline = parse_outline(content)
 
-        discovered_domains = expand_allowlist_from_content(content, state, depth_threshold=2)
+        discovered_domains = expand_allowlist_from_content(content, state)
 
         await state.cache.set_page(
             url=url,
