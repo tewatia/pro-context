@@ -84,3 +84,70 @@ class ReadPageOutput(BaseModel):
         default=False,
         description="True if cache entry is expired; a background refresh is already in progress.",
     )
+
+
+class SearchPageInput(BaseModel):
+    url: str
+    query: str
+    mode: Literal["literal", "regex"] = "literal"
+    case_mode: Literal["smart", "insensitive", "sensitive"] = "smart"
+    whole_word: bool = False
+    offset: int = 1
+    max_results: int = 20
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) > 2048:
+            raise ValueError("url must not exceed 2048 characters")
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("url must use http or https scheme")
+        return v
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("query must not be empty")
+        if len(v) > 200:
+            raise ValueError("query must not exceed 200 characters")
+        return v
+
+    @field_validator("offset")
+    @classmethod
+    def validate_offset(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("offset must be >= 1")
+        return v
+
+    @field_validator("max_results")
+    @classmethod
+    def validate_max_results(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("max_results must be >= 1")
+        return v
+
+
+class LineMatchOutput(BaseModel):
+    line_number: int = Field(description="1-based line number of the matching line.")
+    content: str = Field(description="The full text of the matching line.")
+
+
+class SearchPageOutput(BaseModel):
+    url: str = Field(description="The URL that was searched.")
+    query: str = Field(description="The search query as provided.")
+    outline: str = Field(description="Plain-text structural outline of the full page.")
+    matches: list[LineMatchOutput] = Field(
+        description="Lines matching the query, in document order."
+    )
+    total_lines: int = Field(description="Total number of lines in the page.")
+    has_more: bool = Field(description="True if more matches exist beyond the returned set.")
+    next_offset: int | None = Field(
+        description="Line number to pass as offset to continue paginating. Null if no more."
+    )
+    cached: bool = Field(description="True if served from cache.")
+    cached_at: datetime | None = Field(
+        description="When this page was last fetched. Null for fresh network fetches."
+    )

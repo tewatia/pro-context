@@ -16,6 +16,7 @@ from procontext.cache import Cache
 from procontext.errors import ErrorCode, ProContextError
 from procontext.tools.read_page import handle as read_page_handle
 from procontext.tools.resolve_library import handle
+from procontext.tools.search_page import handle as search_page_handle
 
 if TYPE_CHECKING:
     from procontext.state import AppState
@@ -504,3 +505,97 @@ class TestReadPageHandler:
             await read_page_handle(base_url, 1, 500, app_state)
 
         assert respx.calls.call_count == 2
+
+
+class TestSearchPageHandler:
+    """Full handler pipeline tests for search_page."""
+
+    @respx.mock
+    async def test_search_cache_miss_returns_matches(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await search_page_handle(_SAMPLE_URL, "streaming", app_state)
+
+        assert result["url"] == _SAMPLE_URL
+        assert result["query"] == "streaming"
+        assert result["cached"] is False
+        assert len(result["matches"]) > 0
+        assert all("line_number" in m and "content" in m for m in result["matches"])
+
+    @respx.mock
+    async def test_search_cache_hit_shared_with_read_page(self, app_state: AppState) -> None:
+        """read_page populates cache, search_page uses it — no extra fetch."""
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        # Populate cache via read_page
+        await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+        assert respx.calls.call_count == 1
+
+        # search_page should use the cached content
+        result = await search_page_handle(_SAMPLE_URL, "streaming", app_state)
+        assert result["cached"] is True
+        assert respx.calls.call_count == 1  # No additional network call
+
+    @respx.mock
+    async def test_search_invalid_regex_raises(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        with pytest.raises(ProContextError) as exc_info:
+            await search_page_handle(_SAMPLE_URL, "[invalid", app_state, mode="regex")
+        assert exc_info.value.code == ErrorCode.INVALID_INPUT
+
+    @respx.mock
+    async def test_search_no_matches_returns_empty(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await search_page_handle(_SAMPLE_URL, "xyzzy_nonexistent", app_state)
+        assert result["matches"] == []
+        assert result["has_more"] is False
+        assert result["next_offset"] is None
+
+    @respx.mock
+    async def test_search_pagination(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await search_page_handle(_SAMPLE_URL, "stream", app_state, max_results=1)
+        assert len(result["matches"]) == 1
+        # "stream" appears in many lines, so there should be more
+        assert result["has_more"] is True
+        assert result["next_offset"] is not None
+
+        # Second page
+        result2 = await search_page_handle(
+            _SAMPLE_URL,
+            "stream",
+            app_state,
+            max_results=100,
+            offset=result["next_offset"],
+        )
+        assert len(result2["matches"]) > 0
+        # No overlap
+        first_lines = {m["line_number"] for m in result["matches"]}
+        second_lines = {m["line_number"] for m in result2["matches"]}
+        assert first_lines.isdisjoint(second_lines)
+
+    @respx.mock
+    async def test_search_output_contains_all_fields(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await search_page_handle(_SAMPLE_URL, "streaming", app_state)
+        assert set(result.keys()) == {
+            "url",
+            "query",
+            "outline",
+            "matches",
+            "total_lines",
+            "has_more",
+            "next_offset",
+            "cached",
+            "cached_at",
+        }
+
+    async def test_search_url_not_allowed_raises(self, app_state: AppState) -> None:
+        evil_url = "https://evil.example.com/docs.md"
+        with pytest.raises(ProContextError) as exc_info:
+            await search_page_handle(evil_url, "test", app_state)
+        assert exc_info.value.code == ErrorCode.URL_NOT_ALLOWED

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from procontext.models.tools import ReadPageInput, ResolveLibraryInput
+from procontext.models.tools import ReadPageInput, ResolveLibraryInput, SearchPageInput
 from procontext.resolver import normalise_query, resolve_library
 
 if TYPE_CHECKING:
@@ -214,6 +214,41 @@ class TestReadPageInputBoundary:
     def test_non_http_url_rejected(self) -> None:
         with pytest.raises(ValueError, match="http"):
             ReadPageInput(url="ftp://example.com/page")
+
+
+class TestSearchPageInputBoundary:
+    def test_valid_input(self) -> None:
+        validated = SearchPageInput(url="https://example.com/page", query="test")
+        assert validated.query == "test"
+        assert validated.mode == "literal"
+        assert validated.case_mode == "smart"
+        assert validated.whole_word is False
+        assert validated.offset == 1
+        assert validated.max_results == 20
+
+    def test_empty_query_rejected(self) -> None:
+        with pytest.raises(ValueError, match="empty"):
+            SearchPageInput(url="https://example.com/page", query="   ")
+
+    def test_query_over_200_chars_rejected(self) -> None:
+        with pytest.raises(ValueError, match="200"):
+            SearchPageInput(url="https://example.com/page", query="a" * 201)
+
+    def test_query_at_200_chars_accepted(self) -> None:
+        validated = SearchPageInput(url="https://example.com/page", query="a" * 200)
+        assert len(validated.query) == 200
+
+    def test_offset_zero_rejected(self) -> None:
+        with pytest.raises(ValueError, match="offset"):
+            SearchPageInput(url="https://example.com/page", query="test", offset=0)
+
+    def test_max_results_zero_rejected(self) -> None:
+        with pytest.raises(ValueError, match="max_results"):
+            SearchPageInput(url="https://example.com/page", query="test", max_results=0)
+
+    def test_non_http_url_rejected(self) -> None:
+        with pytest.raises(ValueError, match="http"):
+            SearchPageInput(url="ftp://example.com/page", query="test")
 
 
 class TestMatchStructure:

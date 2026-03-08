@@ -8,10 +8,13 @@ from procontext.models.registry import (
     RegistryPackages,
 )
 from procontext.models.tools import (
+    LineMatchOutput,
     ReadPageInput,
     ReadPageOutput,
     ResolveLibraryInput,
     ResolveLibraryOutput,
+    SearchPageInput,
+    SearchPageOutput,
 )
 
 __all__ = [
@@ -27,4 +30,7 @@ __all__ = [
     "ResolveLibraryOutput",
     "ReadPageInput",
     "ReadPageOutput",
+    "SearchPageInput",
+    "SearchPageOutput",
+    "LineMatchOutput",
 ]
