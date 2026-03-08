@@ -19,6 +19,7 @@ class RegistryEntry(BaseModel):
     name: str
     description: str = ""
     docs_url: str | None = None
+    readme_url: str | None = None
     repo_url: str | None = None
     languages: list[str] = []
     packages: RegistryPackages = RegistryPackages()
@@ -40,6 +41,11 @@ class LibraryMatch(BaseModel):
     name: str = Field(description="Human-readable library name.")
     description: str = Field(description="Short description of what the library does.")
     languages: list[str] = Field(description="Programming languages this library supports.")
+    llms_txt_url: str = Field(description="URL of the library's llms.txt documentation index.")
+    docs_url: str | None = Field(
+        default=None, description="URL of the library's documentation site."
+    )
+    readme_url: str | None = Field(default=None, description="URL of the library's README.")
     matched_via: Literal["package_name", "library_id", "alias", "fuzzy"] = Field(
         description="Match method: package_name, library_id, alias, or fuzzy text match."
     )

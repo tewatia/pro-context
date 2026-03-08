@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from procontext.models.tools import GetLibraryDocsInput, ReadPageInput, ResolveLibraryInput
+from procontext.models.tools import ReadPageInput, ResolveLibraryInput
 from procontext.resolver import normalise_query, resolve_library
 
 if TYPE_CHECKING:
@@ -182,25 +182,6 @@ class TestResolveLibraryInputBoundary:
             ResolveLibraryInput(query="   ")
 
 
-class TestGetLibraryDocsInputBoundary:
-    def test_valid_library_id(self) -> None:
-        validated = GetLibraryDocsInput(library_id="langchain")
-        assert validated.library_id == "langchain"
-
-    def test_library_id_with_leading_digit(self) -> None:
-        # Regex allows leading digits: ^[a-z0-9][a-z0-9_-]*$
-        validated = GetLibraryDocsInput(library_id="123abc")
-        assert validated.library_id == "123abc"
-
-    def test_library_id_uppercase_rejected(self) -> None:
-        with pytest.raises(ValueError, match="Invalid library ID"):
-            GetLibraryDocsInput(library_id="LangChain")
-
-    def test_library_id_with_spaces_rejected(self) -> None:
-        with pytest.raises(ValueError, match="Invalid library ID"):
-            GetLibraryDocsInput(library_id="lang chain")
-
-
 class TestReadPageInputBoundary:
     def test_offset_at_1_accepted(self) -> None:
         validated = ReadPageInput(url="https://example.com/page", offset=1, limit=10)
@@ -245,5 +226,8 @@ class TestMatchStructure:
         assert match.name == "LangChain"
         assert match.description == "Framework for building LLM-powered applications."
         assert "python" in match.languages
+        assert match.llms_txt_url == "https://python.langchain.com/llms.txt"
+        assert match.docs_url == "https://python.langchain.com/docs/"
+        assert match.readme_url is None
         assert match.matched_via == "package_name"
         assert match.relevance == 1.0

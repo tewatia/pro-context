@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from procontext.models.cache import PageCacheEntry, TocCacheEntry
+from procontext.models.cache import PageCacheEntry
 from procontext.models.registry import (
     LibraryMatch,
     RegistryEntry,
@@ -8,8 +8,6 @@ from procontext.models.registry import (
     RegistryPackages,
 )
 from procontext.models.tools import (
-    GetLibraryDocsInput,
-    GetLibraryDocsOutput,
     ReadPageInput,
     ReadPageOutput,
     ResolveLibraryInput,
@@ -23,13 +21,10 @@ __all__ = [
     "RegistryIndexes",
     "LibraryMatch",
     # cache
-    "TocCacheEntry",
     "PageCacheEntry",
     # tools
     "ResolveLibraryInput",
     "ResolveLibraryOutput",
-    "GetLibraryDocsInput",
-    "GetLibraryDocsOutput",
     "ReadPageInput",
     "ReadPageOutput",
 ]

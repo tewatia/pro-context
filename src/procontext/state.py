@@ -2,11 +2,6 @@
 
 AppState is created once at server startup (inside the FastMCP lifespan context
 manager) and injected into every tool handler via the MCP Context object.
-
-Fields are populated progressively across implementation phases:
-  Phase 0 — settings only
-  Phase 1 — indexes, registry_version
-  Phase 2 — http_client, cache, fetcher, allowlist
 """
 
 from __future__ import annotations
@@ -28,16 +23,11 @@ if TYPE_CHECKING:
 class AppState:
     """Holds all shared runtime state. Passed to every tool handler."""
 
-    # Phase 0
     settings: Settings
-
-    # Phase 1: Registry & Resolution
     indexes: RegistryIndexes
     registry_version: str = ""
     registry_path: Path | None = None
     registry_state_path: Path | None = None
-
-    # Phase 2: Fetcher & Cache
     http_client: httpx.AsyncClient | None = None
     cache: CacheProtocol | None = None
     fetcher: FetcherProtocol | None = None

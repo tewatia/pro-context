@@ -73,47 +73,6 @@ def _run_mcp_exchange(env: dict[str, str], messages: list[dict]) -> list[dict]:
     return responses
 
 
-def _seed_toc_cache(
-    tmp_path: Path,
-    *,
-    library_id: str,
-    llms_txt_url: str,
-    content: str,
-) -> None:
-    db_path = tmp_path / "cache.db"
-    now = datetime.now(UTC)
-    expires_at = now + timedelta(hours=24)
-
-    with closing(sqlite3.connect(db_path)) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS toc_cache (
-                library_id         TEXT PRIMARY KEY,
-                llms_txt_url       TEXT NOT NULL,
-                content            TEXT NOT NULL,
-                discovered_domains TEXT NOT NULL DEFAULT '',
-                fetched_at         TEXT NOT NULL,
-                expires_at         TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO toc_cache
-            (library_id, llms_txt_url, content, fetched_at, expires_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                library_id,
-                llms_txt_url,
-                content,
-                now.isoformat(),
-                expires_at.isoformat(),
-            ),
-        )
-        conn.commit()
-
-
 def _seed_page_cache(
     tmp_path: Path,
     *,
@@ -188,16 +147,12 @@ def test_initialize_and_tools_list_contract(subprocess_env: dict[str, str]) -> N
     tools_by_name = {tool["name"]: tool for tool in tools}
 
     assert "resolve_library" in tools_by_name
-    assert "get_library_index" in tools_by_name
     assert "read_page" in tools_by_name
+    assert "get_library_index" not in tools_by_name
 
     resolve_schema = tools_by_name["resolve_library"]["inputSchema"]
     assert resolve_schema["type"] == "object"
     assert "query" in resolve_schema["required"]
-
-    get_docs_schema = tools_by_name["get_library_index"]["inputSchema"]
-    assert get_docs_schema["type"] == "object"
-    assert "library_id" in get_docs_schema["required"]
 
     read_page_schema = tools_by_name["read_page"]["inputSchema"]
     assert read_page_schema["type"] == "object"
@@ -206,13 +161,12 @@ def test_initialize_and_tools_list_contract(subprocess_env: dict[str, str]) -> N
     assert read_page_schema["properties"]["limit"]["type"] == "integer"
 
     # Each tool must advertise its outputSchema.
-    for tool_name in ("resolve_library", "get_library_index", "read_page"):
+    for tool_name in ("resolve_library", "read_page"):
         tool = tools_by_name[tool_name]
         assert "outputSchema" in tool, f"{tool_name} missing outputSchema"
         assert tool["outputSchema"]["type"] == "object"
 
     assert "matches" in tools_by_name["resolve_library"]["outputSchema"]["properties"]
-    assert "library_id" in tools_by_name["get_library_index"]["outputSchema"]["properties"]
     assert "outline" in tools_by_name["read_page"]["outputSchema"]["properties"]
 
 
@@ -329,96 +283,6 @@ def test_read_page_wire_error_envelope(subprocess_env: dict[str, str]) -> None:
 
     text = tool_response["result"]["content"][0]["text"]
     assert "URL_NOT_ALLOWED" in text
-
-
-def test_get_library_index_wire_success_from_cache(
-    tmp_path: Path, subprocess_env: dict[str, str]
-) -> None:
-    _seed_toc_cache(
-        tmp_path,
-        library_id="langchain",
-        llms_txt_url="https://python.langchain.com/llms.txt",
-        content="# LangChain\n\n## Concepts\n\n- [Chat Models](https://python.langchain.com/docs/concepts/chat_models.md)",
-    )
-
-    responses = _run_mcp_exchange(
-        subprocess_env,
-        [
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-11-25",
-                    "capabilities": {},
-                    "clientInfo": {"name": "pytest", "version": "0"},
-                },
-            },
-            {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "get_library_index",
-                    "arguments": {"library_id": "langchain"},
-                },
-            },
-        ],
-    )
-
-    tool_response = next(response for response in responses if response.get("id") == 2)
-    assert tool_response["result"]["isError"] is False
-
-    payload = json.loads(tool_response["result"]["content"][0]["text"])
-    assert payload["library_id"] == "langchain"
-    assert payload["name"] == "LangChain"
-    assert payload["cached"] is True
-    assert payload["stale"] is False
-    assert "# LangChain" in payload["content"]
-    assert set(payload.keys()) == {
-        "library_id",
-        "name",
-        "index_url",
-        "content",
-        "cached",
-        "cached_at",
-        "stale",
-    }
-
-
-def test_get_library_index_wire_error_envelope(subprocess_env: dict[str, str]) -> None:
-    responses = _run_mcp_exchange(
-        subprocess_env,
-        [
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-11-25",
-                    "capabilities": {},
-                    "clientInfo": {"name": "pytest", "version": "0"},
-                },
-            },
-            {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "get_library_index",
-                    "arguments": {"library_id": "nonexistent-lib"},
-                },
-            },
-        ],
-    )
-
-    tool_response = next(response for response in responses if response.get("id") == 2)
-    assert tool_response["result"]["isError"] is True
-
-    text = tool_response["result"]["content"][0]["text"]
-    assert "LIBRARY_NOT_FOUND" in text
 
 
 def test_server_exits_cleanly_when_registry_missing(tmp_path: Path) -> None:

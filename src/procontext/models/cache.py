@@ -5,18 +5,6 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
-class TocCacheEntry(BaseModel):
-    """Cached llms.txt content for a library."""
-
-    library_id: str
-    llms_txt_url: str
-    content: str  # Raw llms.txt markdown
-    discovered_domains: frozenset[str] = frozenset()  # Base domains found in content
-    fetched_at: datetime
-    expires_at: datetime
-    stale: bool = False
-
-
 class PageCacheEntry(BaseModel):
     """Cached content for a single documentation page."""
 

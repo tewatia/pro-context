@@ -14,7 +14,6 @@ import respx
 
 from procontext.cache import Cache
 from procontext.errors import ErrorCode, ProContextError
-from procontext.tools.get_library_docs import handle as get_docs_handle
 from procontext.tools.read_page import handle as read_page_handle
 from procontext.tools.resolve_library import handle
 
@@ -42,6 +41,9 @@ class TestResolveLibraryHandler:
             "name",
             "description",
             "languages",
+            "llms_txt_url",
+            "docs_url",
+            "readme_url",
             "matched_via",
             "relevance",
         }
@@ -70,131 +72,6 @@ class TestResolveLibraryHandler:
     async def test_pip_specifier_resolves_correctly(self, app_state: AppState) -> None:
         result = await handle("langchain-openai>=0.3", app_state)
         assert result["matches"][0]["library_id"] == "langchain"
-
-
-class TestGetLibraryDocsHandler:
-    """Full handler pipeline tests for get_library_index."""
-
-    @respx.mock
-    async def test_cache_miss_fetches_from_network(self, app_state: AppState) -> None:
-        respx.get("https://python.langchain.com/llms.txt").mock(
-            return_value=httpx.Response(200, text="# LangChain Docs\n\n## Concepts")
-        )
-        result = await get_docs_handle("langchain", app_state)
-        assert result["library_id"] == "langchain"
-        assert result["name"] == "LangChain"
-        assert result["content"] == "# LangChain Docs\n\n## Concepts"
-        assert result["cached"] is False
-        assert result["cached_at"] is None
-        assert result["stale"] is False
-
-    @respx.mock
-    async def test_cache_hit_returns_cached(self, app_state: AppState) -> None:
-        respx.get("https://python.langchain.com/llms.txt").mock(
-            return_value=httpx.Response(200, text="# LangChain Docs")
-        )
-        # First call — cache miss
-        await get_docs_handle("langchain", app_state)
-
-        # Second call — cache hit
-        result = await get_docs_handle("langchain", app_state)
-        assert result["cached"] is True
-        assert result["cached_at"] is not None
-        assert result["stale"] is False
-        assert result["content"] == "# LangChain Docs"
-
-        # Only one HTTP request was made
-        assert respx.calls.call_count == 1
-
-    async def test_unknown_library_raises_not_found(self, app_state: AppState) -> None:
-        with pytest.raises(ProContextError) as exc_info:
-            await get_docs_handle("nonexistent-lib", app_state)
-        assert exc_info.value.code == ErrorCode.LIBRARY_NOT_FOUND
-        assert exc_info.value.recoverable is False
-
-    async def test_invalid_library_id_raises_invalid_input(self, app_state: AppState) -> None:
-        with pytest.raises(ProContextError) as exc_info:
-            await get_docs_handle("INVALID!!", app_state)
-        assert exc_info.value.code == ErrorCode.INVALID_INPUT
-        assert exc_info.value.recoverable is False
-
-    @respx.mock
-    async def test_stale_cache_returns_stale_true(self, app_state: AppState) -> None:
-        respx.get("https://python.langchain.com/llms.txt").mock(
-            return_value=httpx.Response(200, text="# Stale content")
-        )
-        # First call to populate cache
-        await get_docs_handle("langchain", app_state)
-
-        # Artificially expire the cached entry to simulate stale-while-revalidate.
-        # Accesses Cache._db directly because the public API has no way to set a
-        # past expiry. This couples the test to the SQLite implementation — acceptable
-        # here since Cache's own unit tests cover the backend contract independently.
-        from datetime import UTC, datetime, timedelta
-
-        past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-        assert isinstance(app_state.cache, Cache)
-        await app_state.cache._db.execute(  # pyright: ignore[reportPrivateUsage]
-            "UPDATE toc_cache SET expires_at = ? WHERE library_id = ?",
-            (past, "langchain"),
-        )
-        await app_state.cache._db.commit()  # pyright: ignore[reportPrivateUsage]
-
-        # Second call — stale hit
-        result = await get_docs_handle("langchain", app_state)
-        assert result["cached"] is True
-        assert result["stale"] is True
-        assert result["content"] == "# Stale content"
-
-    @respx.mock
-    async def test_output_contains_all_required_fields(self, app_state: AppState) -> None:
-        respx.get("https://python.langchain.com/llms.txt").mock(
-            return_value=httpx.Response(200, text="# Docs")
-        )
-        result = await get_docs_handle("langchain", app_state)
-        assert set(result.keys()) == {
-            "library_id",
-            "name",
-            "index_url",
-            "content",
-            "cached",
-            "cached_at",
-            "stale",
-        }
-
-    @respx.mock
-    async def test_llms_404_maps_to_llms_not_found(self, app_state: AppState) -> None:
-        respx.get("https://python.langchain.com/llms.txt").mock(return_value=httpx.Response(404))
-        with pytest.raises(ProContextError) as exc_info:
-            await get_docs_handle("langchain", app_state)
-        assert exc_info.value.code == ErrorCode.LLMS_TXT_NOT_FOUND
-        assert exc_info.value.recoverable is False
-
-    @respx.mock
-    async def test_network_failure_raises_fetch_failed(self, app_state: AppState) -> None:
-        respx.get("https://python.langchain.com/llms.txt").mock(return_value=httpx.Response(503))
-        with pytest.raises(ProContextError) as exc_info:
-            await get_docs_handle("langchain", app_state)
-        assert exc_info.value.code == ErrorCode.LLMS_TXT_FETCH_FAILED
-        assert exc_info.value.recoverable is True
-
-    @respx.mock
-    async def test_too_many_redirects_raises_redirect_error(self, app_state: AppState) -> None:
-        r0 = "https://python.langchain.com/llms.txt"
-        r1 = "https://python.langchain.com/r1"
-        r2 = "https://python.langchain.com/r2"
-        r3 = "https://python.langchain.com/r3"
-        r4 = "https://python.langchain.com/r4"
-        respx.get(r0).mock(return_value=httpx.Response(301, headers={"location": r1}))
-        respx.get(r1).mock(return_value=httpx.Response(301, headers={"location": r2}))
-        respx.get(r2).mock(return_value=httpx.Response(301, headers={"location": r3}))
-        respx.get(r3).mock(return_value=httpx.Response(301, headers={"location": r4}))
-        respx.get(r4).mock(return_value=httpx.Response(200, text="# Docs"))
-
-        with pytest.raises(ProContextError) as exc_info:
-            await get_docs_handle("langchain", app_state)
-        assert exc_info.value.code == ErrorCode.TOO_MANY_REDIRECTS
-        assert exc_info.value.recoverable is False
 
 
 # A small Markdown page used across read_page tests

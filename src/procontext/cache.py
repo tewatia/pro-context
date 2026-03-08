@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 import aiosqlite
 import structlog
 
-from procontext.models.cache import PageCacheEntry, TocCacheEntry
+from procontext.models.cache import PageCacheEntry
 
 log = structlog.get_logger()
 
@@ -74,69 +74,6 @@ class Cache:
         await self._db.execute(_CREATE_PAGE_INDEX)
         await self._db.execute(_CREATE_METADATA_TABLE)
         await self._db.commit()
-
-    # ------------------------------------------------------------------
-    # ToC cache
-    # ------------------------------------------------------------------
-
-    async def get_toc(self, library_id: str) -> TocCacheEntry | None:
-        """Read a ToC entry. Returns ``None`` on cache miss or read failure."""
-        try:
-            cursor = await self._db.execute(
-                "SELECT library_id, llms_txt_url, content, discovered_domains, "
-                "fetched_at, expires_at FROM toc_cache WHERE library_id = ?",
-                (library_id,),
-            )
-            row = await cursor.fetchone()
-            if row is None:
-                return None
-
-            fetched_at = datetime.fromisoformat(row[4])
-            expires_at = datetime.fromisoformat(row[5])
-            stale = datetime.now(UTC) > expires_at
-
-            return TocCacheEntry(
-                library_id=row[0],
-                llms_txt_url=row[1],
-                content=row[2],
-                discovered_domains=frozenset(row[3].split()),
-                fetched_at=fetched_at,
-                expires_at=expires_at,
-                stale=stale,
-            )
-        except (aiosqlite.Error, ValueError):
-            log.warning("cache_read_error", key=f"toc:{library_id}", exc_info=True)
-            return None
-
-    async def set_toc(
-        self,
-        library_id: str,
-        llms_txt_url: str,
-        content: str,
-        ttl_hours: int,
-        *,
-        discovered_domains: frozenset[str] = frozenset(),
-    ) -> None:
-        """Write a ToC entry. Non-fatal on failure."""
-        try:
-            now = datetime.now(UTC)
-            expires_at = now + timedelta(hours=ttl_hours)
-            await self._db.execute(
-                "INSERT OR REPLACE INTO toc_cache "
-                "(library_id, llms_txt_url, content, discovered_domains, fetched_at, expires_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    library_id,
-                    llms_txt_url,
-                    content,
-                    " ".join(sorted(discovered_domains)),
-                    now.isoformat(),
-                    expires_at.isoformat(),
-                ),
-            )
-            await self._db.commit()
-        except aiosqlite.Error:
-            log.warning("cache_write_error", key=f"toc:{library_id}", exc_info=True)
 
     # ------------------------------------------------------------------
     # Page cache
@@ -208,30 +145,25 @@ class Cache:
     # Allowlist restoration
     # ------------------------------------------------------------------
 
-    async def load_discovered_domains(
-        self, *, include_toc: bool, include_pages: bool
-    ) -> frozenset[str]:
+    async def load_discovered_domains(self) -> frozenset[str]:
         """Collect all discovered domains from cached entries.
 
+        Reads from both toc_cache and page_cache unconditionally.
         Used at startup to restore the in-memory allowlist from the previous
         session. Non-fatal on database failure — returns empty frozenset.
         """
-        if not include_toc and not include_pages:
-            return frozenset()
         try:
             domains: set[str] = set()
-            if include_toc:
-                cursor = await self._db.execute(
-                    "SELECT discovered_domains FROM toc_cache WHERE discovered_domains != ''"
-                )
-                for row in await cursor.fetchall():
-                    domains.update(row[0].split())
-            if include_pages:
-                cursor = await self._db.execute(
-                    "SELECT discovered_domains FROM page_cache WHERE discovered_domains != ''"
-                )
-                for row in await cursor.fetchall():
-                    domains.update(row[0].split())
+            cursor = await self._db.execute(
+                "SELECT discovered_domains FROM toc_cache WHERE discovered_domains != ''"
+            )
+            for row in await cursor.fetchall():
+                domains.update(row[0].split())
+            cursor = await self._db.execute(
+                "SELECT discovered_domains FROM page_cache WHERE discovered_domains != ''"
+            )
+            for row in await cursor.fetchall():
+                domains.update(row[0].split())
             return frozenset(domains)
         except aiosqlite.Error:
             log.warning("cache_load_discovered_domains_error", exc_info=True)

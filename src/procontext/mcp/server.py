@@ -1,6 +1,6 @@
 """MCP tool registrations.
 
-Defines the FastMCP instance and registers the three ProContext tools.
+Defines the FastMCP instance and registers the ProContext tools.
 Startup, logging setup, and lifespan management live in their own modules.
 """
 
@@ -12,13 +12,12 @@ import structlog
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
-import procontext.tools.get_library_docs as t_get_docs
 import procontext.tools.read_page as t_read_page
 import procontext.tools.resolve_library as t_resolve
 from procontext import __version__
 from procontext.errors import ProContextError
 from procontext.mcp.lifespan import lifespan
-from procontext.models.tools import GetLibraryDocsOutput, ReadPageOutput, ResolveLibraryOutput
+from procontext.models.tools import ReadPageOutput, ResolveLibraryOutput
 
 if TYPE_CHECKING:
     from procontext.state import AppState
@@ -47,13 +46,17 @@ async def resolve_library(
     Matched in priority order: exact PyPI/npm package names, canonical library IDs,
     registered aliases, then fuzzy name matching.
 
-    Always call this first to obtain a library_id, then pass it to get_library_index.
+    Always call this first to identify a library and obtain its documentation URLs.
+    Then pass the llms_txt_url to read_page to get the documentation index.
 
     Response:
       matches        — ranked list of results, sorted by relevance descending
       Each match contains:
-        library_id   — pass this to get_library_index
+        library_id   — canonical library identifier
         name         — human-readable library name
+        llms_txt_url — URL of the documentation index (pass to read_page)
+        docs_url     — documentation site URL (may be null)
+        readme_url   — README URL (may be null)
         languages    — programming languages the library supports
         matched_via  — "package_name" | "library_id" | "alias" | "fuzzy"
         relevance    — confidence score 0.0 (low) to 1.0 (high)
@@ -68,41 +71,6 @@ async def resolve_library(
         raise
     except Exception:
         log.error("tool_unexpected_error", tool="resolve_library", exc_info=True)
-        raise
-
-
-@mcp.tool()
-async def get_library_index(
-    library_id: Annotated[
-        str,
-        Field(description="Library ID returned by resolve_library."),
-    ],
-    ctx: Context,
-) -> GetLibraryDocsOutput:
-    """Fetch the table of contents for a library's documentation.
-
-    Requires a library_id from resolve_library. Returns the library's llms.txt
-    index — a structured markdown document listing documentation pages with
-    titles and URLs. Pass those URLs to read_page to get page content.
-
-    Response:
-      library_id   — canonical library ID
-      name         — human-readable library name
-      index_url    — source URL of the index; use as base for resolving relative links
-      content      — raw markdown index with page titles and URLs
-      cached       — true if served from cache
-      cached_at    — ISO timestamp of last fetch; null for fresh network responses
-      stale        — true if the cache entry is expired and a background refresh
-                     is already in progress; the content is still usable
-    """
-    state: AppState = ctx.request_context.lifespan_context
-    try:
-        return GetLibraryDocsOutput.model_validate(await t_get_docs.handle(library_id, state))
-    except ProContextError as exc:
-        log.warning("tool_error", tool="get_library_index", code=exc.code, message=exc.message)
-        raise
-    except Exception:
-        log.error("tool_unexpected_error", tool="get_library_index", exc_info=True)
         raise
 
 
@@ -133,8 +101,8 @@ async def read_page(
 ) -> ReadPageOutput:
     """Fetch the outline and content of a documentation page.
 
-    Accepts any documentation URL from get_library_index or linked within a
-    previously fetched page.
+    Accepts any documentation URL — typically the llms_txt_url from
+    resolve_library or a link found within a previously fetched page.
 
     Navigation patterns:
       Pattern 1 (default) — call with view="full". Use outline line numbers

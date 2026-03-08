@@ -1,7 +1,7 @@
 """Integration test fixtures.
 
 Provides a fully wired AppState with in-memory SQLite, mocked HTTP client,
-and all Phase 2 components. Registry-related fixtures come from
+and all server components. Registry-related fixtures come from
 tests/conftest.py (sample_entries, indexes).
 """
 
@@ -86,7 +86,7 @@ def subprocess_env(tmp_path: Path) -> dict[str, str]:
 
 @pytest.fixture()
 async def app_state(indexes: RegistryIndexes, sample_entries: list[RegistryEntry]) -> AppState:
-    """Full AppState wired for Phase 2 integration tests."""
+    """Full AppState wired for integration tests."""
     async with aiosqlite.connect(":memory:") as db:
         cache = Cache(db)
         await cache.init_db()

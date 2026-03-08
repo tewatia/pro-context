@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from typing import Literal
 
@@ -26,40 +25,6 @@ class ResolveLibraryInput(BaseModel):
 class ResolveLibraryOutput(BaseModel):
     matches: list[LibraryMatch] = Field(
         description="Ranked list of matching libraries, sorted by relevance descending."
-    )
-
-
-class GetLibraryDocsInput(BaseModel):
-    library_id: str
-
-    @field_validator("library_id")
-    @classmethod
-    def validate_library_id(cls, v: str) -> str:
-        v = v.strip()
-        if not re.match(r"^[a-z0-9][a-z0-9_-]*$", v):
-            raise ValueError(f"Invalid library ID: {v!r}")
-        return v
-
-
-class GetLibraryDocsOutput(BaseModel):
-    library_id: str = Field(description="Canonical library ID.")
-    name: str = Field(description="Human-readable library name.")
-    index_url: str = Field(
-        description=(
-            "Source URL of this library's documentation index. "
-            "Use as the base URL to resolve any relative links found in content."
-        )
-    )
-    content: str = Field(
-        description="Raw markdown index of documentation pages with titles and URLs."
-    )
-    cached: bool = Field(description="True if served from cache.")
-    cached_at: datetime | None = Field(
-        description="When this content was last fetched. Null for fresh network fetches."
-    )
-    stale: bool = Field(
-        default=False,
-        description="True if cache entry is expired; a background refresh is already in progress.",
     )
 
 

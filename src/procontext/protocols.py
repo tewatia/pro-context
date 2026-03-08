@@ -11,23 +11,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from procontext.models.cache import PageCacheEntry, TocCacheEntry
+    from procontext.models.cache import PageCacheEntry
 
 
 class CacheProtocol(Protocol):
     """Interface for the documentation cache backend."""
-
-    async def get_toc(self, library_id: str) -> TocCacheEntry | None: ...
-
-    async def set_toc(
-        self,
-        library_id: str,
-        llms_txt_url: str,
-        content: str,
-        ttl_hours: int,
-        *,
-        discovered_domains: frozenset[str] = frozenset(),
-    ) -> None: ...
 
     async def get_page(self, url_hash: str) -> PageCacheEntry | None: ...
 
@@ -42,9 +30,7 @@ class CacheProtocol(Protocol):
         discovered_domains: frozenset[str] = frozenset(),
     ) -> None: ...
 
-    async def load_discovered_domains(
-        self, *, include_toc: bool, include_pages: bool
-    ) -> frozenset[str]: ...
+    async def load_discovered_domains(self) -> frozenset[str]: ...
 
     async def cleanup_if_due(self, interval_hours: int) -> None: ...
 
