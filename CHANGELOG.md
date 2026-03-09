@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`search_page` tool** — grep-like search within a documentation page.
+  Supports literal and regex modes, smart case sensitivity (ripgrep-style),
+  word boundary matching, and paginated results. Shares the same page cache
+  as `read_page` — a page fetched by one tool is immediately available to
+  the other without a re-fetch.
 - **`procontext setup` command** — one-time CLI command that downloads and
   persists the registry to the platform data directory. Run this after
   installing before starting the server for the first time.
@@ -26,11 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`resolve_library` no longer returns `docs_url`** — the field has been
-  removed from the response. It was the human-facing documentation homepage and
-  is not a valid input to any tool, serving no purpose in the agent workflow.
-  Use `get_library_index` to retrieve the llms.txt table of contents and then
-  `read_page` for individual pages.
+- **`resolve_library` now returns documentation URLs** — each match includes
+  `index_url`, `docs_url`, and `readme_url`. The agent passes `index_url`
+  directly to `read_page` to browse the documentation index, eliminating
+  the previous `get_library_index` intermediate step.
+- **`get_library_index` tool removed** — its functionality is absorbed by
+  `resolve_library` (which now provides the index URL) combined with
+  `read_page` (which fetches any documentation page including llms.txt indexes).
+- **`allowlist_depth` replaced with `allowlist_expansion`** — the three-level
+  integer setting (`0`, `1`, `2`) is replaced by a two-value string enum:
+  `"registry"` (default, strictest) or `"discovered"` (registry + domains
+  found in fetched content).
 
 - **Bundled registry snapshot removed** — the server no longer ships with an
   embedded registry. Use `procontext setup` to initialise the registry before

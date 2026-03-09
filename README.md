@@ -78,9 +78,9 @@ Add to your MCP client config:
 
 ## How It Works
 
-ProContext exposes three MCP tools that work as a pipeline. The agent drives the navigation - no server-side search, no intent guessing.
+ProContext exposes three MCP tools. The agent drives the navigation — no server-side search, no intent guessing.
 
-**Step 1 - Resolve the library**
+**Step 1 — Resolve the library**
 
 ```
 resolve_library({ "query": "langchain>=0.2" })
@@ -88,38 +88,40 @@ resolve_library({ "query": "langchain>=0.2" })
 → {
     "library_id": "langchain",
     "name": "LangChain",
-    "description": "Framework for building LLM-powered applications.",
+    "index_url": "https://python.langchain.com/llms.txt",
+    "docs_url": "https://python.langchain.com/docs/",
     "matched_via": "package_name",
     "relevance": 1.0
   }
 ```
 
-**Step 2 - Fetch the table of contents**
+**Step 2 — Read the documentation index (or any page)**
 
 ```
-get_library_index({ "library_id": "langchain" })
+read_page({ "url": "https://python.langchain.com/llms.txt" })
 
 → {
-    "index_url": "https://python.langchain.com/llms.txt",
-    "content": "# LangChain\n\n## Concepts\n- [Chat Models](https://...)\n- [Tools](https://...)\n...",
-    "cached": false,
-    "stale": false
+    "outline": "1: # LangChain\n3: ## Concepts\n15: ## How-to Guides\n...",
+    "total_lines": 45,
+    "content": "# LangChain\n\n## Concepts\n- [Chat Models](https://...)\n..."
   }
 ```
 
-**Step 3 - Read a specific page**
+**Step 3 — Search within a page**
 
 ```
-read_page({ "url": "https://docs.langchain.com/docs/concepts/chat_models.md", "limit": 200 })
+search_page({ "url": "https://python.langchain.com/llms.txt", "query": "streaming" })
 
 → {
-    "outline": "1: # Chat Models\n45: ## Streaming\n89: ## Tool Calling\n...",
-    "total_lines": 312,
-    "content": "# Chat Models\n\nChat models are..."
+    "matches": [
+      { "line_number": 7, "content": "- [Streaming](https://...): Stream model outputs..." },
+      { "line_number": 22, "content": "- [How to stream responses](https://...): ..." }
+    ],
+    "has_more": false
   }
 ```
 
-The agent reads the TOC, identifies the pages it needs, and reads them directly - jumping to relevant sections via the outline. ProContext fetches from known, pre-validated sources and caches the results for subsequent calls.
+The agent resolves a library, reads the index or pages directly, and searches within them — jumping to relevant sections via the outline. ProContext fetches from known, pre-validated sources and caches the results for subsequent calls.
 
 ---
 

@@ -8,9 +8,9 @@
 
 v0.1.0 ships a complete, production-ready MCP server. The core loop works: an agent resolves a library name, fetches its llms.txt table of contents, and reads specific documentation pages — all from a curated, pre-validated registry with SSRF protection and a stale-while-revalidate cache.
 
-- **`resolve_library`** — resolves a library name or pip specifier to a known documentation source via fuzzy matching against a curated registry
-- **`get_library_index`** — fetches the llms.txt table of contents for a library with stale-while-revalidate caching
-- **`read_page`** — fetches a documentation page with offset/limit windowing and a full heading map for section navigation
+- **`resolve_library`** — resolves a library name or pip specifier to a known documentation source via fuzzy matching against a curated registry; returns documentation URLs for use with `read_page` and `search_page`
+- **`read_page`** — fetches a documentation page (including llms.txt indexes) with offset/limit windowing and a full heading map for section navigation
+- **`search_page`** — grep-like search within a documentation page; supports literal and regex modes, smart case sensitivity, word boundary matching, and paginated results
 - **stdio transport** — default; process lifecycle managed by the MCP client
 - **HTTP transport** — MCP Streamable HTTP (spec 2025-11-25) with security middleware (bearer auth, origin validation, protocol version checks)
 - **SQLite cache** — 24-hour TTL, WAL mode, stale-while-revalidate, background refresh
