@@ -94,7 +94,6 @@ All matching is against in-memory indexes loaded from the registry at startup. N
       "description": "Framework for building LLM-powered applications.",
       "languages": ["python"],
       "index_url": "https://python.langchain.com/llms.txt",
-      "docs_url": "https://python.langchain.com",
       "readme_url": "https://raw.githubusercontent.com/langchain-ai/langchain/master/README.md",
       "matched_via": "package_name",
       "relevance": 1.0
@@ -110,7 +109,6 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 | `description`  | Short description of what the library does. May be empty for older registry entries                        |
 | `languages`    | Languages this library supports                                                                            |
 | `index_url`    | URL to the library's llms.txt documentation index. Pass to `read_page` to browse the table of contents     |
-| `docs_url`     | URL to the library's documentation website. May be `null` for some entries                                 |
 | `readme_url`   | URL to the library's README file (typically on GitHub). May be `null` if not available in the registry      |
 | `matched_via`  | How the match was made: `"package_name"`, `"library_id"`, `"alias"`, `"fuzzy"`                             |
 | `relevance`    | 0.0–1.0. Exact matches are 1.0; fuzzy matches are proportional to edit distance                            |
@@ -132,7 +130,7 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 
 | Parameter | Type    | Required | Default  | Description                                                                                     |
 | --------- | ------- | -------- | -------- | ----------------------------------------------------------------------------------------------- |
-| `url`     | string  | Yes      | —        | URL of the page to read. Typically from `resolve_library` output (`index_url`, `docs_url`, `readme_url`) or from links found within a documentation index. |
+| `url`     | string  | Yes      | —        | URL of the page to read. Typically from `resolve_library` output (`index_url`, `readme_url`) or from links found within a documentation index. |
 | `offset`  | integer | No       | 1        | 1-based line number to start reading from. Use a heading's line number to jump to that section. |
 | `limit`   | integer | No       | 500      | Maximum number of lines to return from the offset.                                              |
 | `view`    | string  | No       | `"full"` | `"full"`: returns outline and content window. `"outline"`: returns outline and total_lines only, no content. |

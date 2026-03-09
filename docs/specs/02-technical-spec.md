@@ -185,7 +185,6 @@ class LibraryMatch(BaseModel):
     description: str          # Short description of what the library does
     languages: list[str]
     index_url: str             # URL to the library's llms.txt documentation index
-    docs_url: str | None      # URL to the library's documentation website
     readme_url: str | None    # URL to the library's README file
     matched_via: Literal["package_name", "library_id", "alias", "fuzzy"]
     relevance: float          # 0.0–1.0

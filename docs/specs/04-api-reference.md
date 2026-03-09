@@ -214,7 +214,7 @@ Tool authors and MCP client implementors need to handle both. The agent should o
 ```json
 {
   "name": "resolve_library",
-  "description": "Resolve a library name, package name, or alias to a known documentation source. Returns zero or more matches with documentation URLs. Always the first step — provides the index_url, docs_url, and readme_url used with read_page and search_page.",
+  "description": "Resolve a library name, package name, or alias to a known documentation source. Returns zero or more matches with documentation URLs. Always the first step — provides the index_url and readme_url used with read_page and search_page.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -276,10 +276,6 @@ All matching is in-memory. No network calls.
             "type": "string",
             "description": "URL to the library's llms.txt documentation index. Pass to read_page to browse the table of contents, or to search_page to find specific topics."
           },
-          "docs_url": {
-            "type": ["string", "null"],
-            "description": "URL to the library's documentation website. May be null for some entries."
-          },
           "readme_url": {
             "type": ["string", "null"],
             "description": "URL to the library's README file (typically raw content from GitHub). May be null if not available in the registry."
@@ -302,7 +298,6 @@ All matching is in-memory. No network calls.
           "description",
           "languages",
           "index_url",
-          "docs_url",
           "readme_url",
           "matched_via",
           "relevance"
@@ -335,7 +330,6 @@ Result (`text` field, parsed):
       "description": "Framework for building LLM-powered applications.",
       "languages": ["python"],
       "index_url": "https://python.langchain.com/llms.txt",
-      "docs_url": "https://python.langchain.com",
       "readme_url": "https://raw.githubusercontent.com/langchain-ai/langchain/master/README.md",
       "matched_via": "package_name",
       "relevance": 1.0
@@ -363,7 +357,6 @@ Result:
       "description": "Modern Python web framework for building APIs.",
       "languages": ["python"],
       "index_url": "https://docs.fastapi.tiangolo.com/llms.txt",
-      "docs_url": "https://fastapi.tiangolo.com",
       "readme_url": null,
       "matched_via": "fuzzy",
       "relevance": 0.92
@@ -411,7 +404,7 @@ An empty `matches` list is a valid, non-error outcome. The library is simply not
     "properties": {
       "url": {
         "type": "string",
-        "description": "URL to read. Typically from resolve_library output (index_url, docs_url, readme_url) or from links found in a documentation index. Must use http or https. Must be a domain from the library registry. If the URL does not end with .md, the server tries url+\".md\" first; on any failure it falls back to the original URL.",
+        "description": "URL to read. Typically from resolve_library output (index_url, readme_url) or from links found in a documentation index. Must use http or https. Must be a domain from the library registry. If the URL does not end with .md, the server tries url+\".md\" first; on any failure it falls back to the original URL.",
         "maxLength": 2048
       },
       "view": {

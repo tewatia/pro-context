@@ -43,7 +43,6 @@ class TestResolveLibraryHandler:
             "description",
             "languages",
             "index_url",
-            "docs_url",
             "readme_url",
             "matched_via",
             "relevance",

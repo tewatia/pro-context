@@ -262,7 +262,6 @@ class TestMatchStructure:
         assert match.description == "Framework for building LLM-powered applications."
         assert "python" in match.languages
         assert match.index_url == "https://python.langchain.com/llms.txt"
-        assert match.docs_url == "https://python.langchain.com/docs/"
         assert match.readme_url is None
         assert match.matched_via == "package_name"
         assert match.relevance == 1.0

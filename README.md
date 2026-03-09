@@ -89,7 +89,6 @@ resolve_library({ "query": "langchain>=0.2" })
     "library_id": "langchain",
     "name": "LangChain",
     "index_url": "https://python.langchain.com/llms.txt",
-    "docs_url": "https://python.langchain.com/docs/",
     "matched_via": "package_name",
     "relevance": 1.0
   }

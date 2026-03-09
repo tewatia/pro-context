@@ -42,9 +42,6 @@ class LibraryMatch(BaseModel):
     description: str = Field(description="Short description of what the library does.")
     languages: list[str] = Field(description="Programming languages this library supports.")
     index_url: str = Field(description="URL of the library's documentation index (llms.txt).")
-    docs_url: str | None = Field(
-        default=None, description="URL of the library's documentation site."
-    )
     readme_url: str | None = Field(default=None, description="URL of the library's README.")
     matched_via: Literal["package_name", "library_id", "alias", "fuzzy"] = Field(
         description="Match method: package_name, library_id, alias, or fuzzy text match."

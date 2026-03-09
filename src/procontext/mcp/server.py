@@ -56,7 +56,6 @@ async def resolve_library(
         library_id   — canonical library identifier
         name         — human-readable library name
         index_url    — URL of the documentation index (pass to read_page)
-        docs_url     — documentation site URL (may be null)
         readme_url   — README URL (may be null)
         languages    — programming languages the library supports
         matched_via  — "package_name" | "library_id" | "alias" | "fuzzy"

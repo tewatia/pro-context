@@ -95,7 +95,6 @@ def _match_from_entry(
         description=entry.description,
         languages=entry.languages,
         index_url=entry.llms_txt_url,
-        docs_url=entry.docs_url,
         readme_url=entry.readme_url,
         matched_via=matched_via,
         relevance=relevance,
