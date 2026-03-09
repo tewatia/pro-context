@@ -1040,13 +1040,13 @@ PROCONTEXT__SERVER__TRANSPORT=http uv run procontext
 | `Content-Type`         | Yes                  | `application/json`                                                                                                            |
 | `MCP-Session-Id`       | Yes (after init)     | Session identifier returned in `initialize` response. Must be included on all subsequent requests in the session.             |
 | `MCP-Protocol-Version` | Recommended          | `2025-11-25` or `2025-03-26`. Validated if present; unknown version → HTTP 400.                                               |
-| `Origin`               | Browser clients only | Must match `http://localhost` or `https://localhost` (with optional port). Non-localhost origins → HTTP 403.                  |
+| `Origin`               | Browser clients only | Must be a loopback origin (`localhost`, `127.0.0.1`, `[::1]`, with optional port). Non-loopback origins → HTTP 403.          |
 
 **Security constraints**:
 
 1. **Optional bearer key authentication**: Authentication is controlled by `server.auth_enabled` (default `false`). If `auth_enabled=true`, HTTP requests must include `Authorization: Bearer <key>`. Missing or incorrect keys are rejected with HTTP 401. If `auth_enabled=true` and `server.auth_key` is empty, a key is auto-generated at startup and logged to stderr. If `auth_enabled=false`, authentication is disabled and a startup warning is logged. Configure via `server.auth_enabled` / `server.auth_key` in `procontext.yaml` or `PROCONTEXT__SERVER__AUTH_ENABLED` / `PROCONTEXT__SERVER__AUTH_KEY`. Stdio mode is unaffected — no authentication is required.
 
-2. **Origin validation**: Requests with a non-localhost `Origin` header are rejected with HTTP 403. This prevents DNS rebinding attacks. Requests without an `Origin` header (standard API clients, curl) are allowed.
+2. **Origin validation**: Requests with a non-loopback `Origin` header are rejected with HTTP 403. Loopback origins such as `http://localhost`, `http://127.0.0.1`, and `http://[::1]` are allowed. Requests without an `Origin` header (standard API clients, curl) are allowed.
 
 3. **Protocol version validation**: If `MCP-Protocol-Version` is present and not in `{"2025-11-25", "2025-03-26"}`, the server returns HTTP 400.
 

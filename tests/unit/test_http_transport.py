@@ -104,6 +104,8 @@ async def test_auth_enabled_malformed_header_returns_401() -> None:
         "https://localhost:9000",
         "http://127.0.0.1",
         "http://127.0.0.1:3000",
+        "http://[::1]",
+        "http://[::1]:8080",
     ],
 )
 async def test_origin_localhost_allowed(origin: str) -> None:
@@ -166,26 +168,53 @@ async def test_absent_protocol_version_allowed() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Check ordering: auth is evaluated before origin
+# Loopback edge cases and check ordering
 # ---------------------------------------------------------------------------
+
+
+async def test_non_loopback_ipv6_origin_blocked() -> None:
+    """Only IPv6 loopback is allowed; other IPv6 hosts remain blocked."""
+    app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
+    async with _client(app) as client:
+        response = await client.get("/mcp", headers={"Origin": "http://[2001:db8::1]:8080"})
+    assert response.status_code == 403
 
 
 @pytest.mark.parametrize(
     "origin",
     [
-        "http://[::1]",
-        "http://[::1]:8080",
+        "ftp://localhost",
+        "ws://localhost",
     ],
 )
-async def test_ipv6_localhost_origin_blocked(origin: str) -> None:
-    """IPv6 loopback ([::1]) is not matched by the origin regex — blocked by design.
-
-    The middleware only allows 'localhost' and '127.0.0.1'. IPv6 loopback is
-    intentionally excluded; this test documents and locks in that behaviour.
-    """
+async def test_non_http_scheme_origin_blocked(origin: str) -> None:
+    """Only http/https schemes are accepted in Origin headers."""
     app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
     async with _client(app) as client:
         response = await client.get("/mcp", headers={"Origin": origin})
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost?redirect=evil.com",
+        "http://localhost#fragment",
+    ],
+)
+async def test_origin_with_query_or_fragment_blocked(origin: str) -> None:
+    """Origins with query strings or fragments are not valid and must be rejected."""
+    app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
+    async with _client(app) as client:
+        response = await client.get("/mcp", headers={"Origin": origin})
+    assert response.status_code == 403
+
+
+async def test_origin_with_no_hostname_blocked() -> None:
+    """An origin that parses to no hostname is rejected."""
+    app = MCPSecurityMiddleware(_ok_app, auth_enabled=False)
+    async with _client(app) as client:
+        response = await client.get("/mcp", headers={"Origin": "http://"})
     assert response.status_code == 403
 
 

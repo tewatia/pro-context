@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import re
+import ipaddress
 import secrets
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import structlog
 import uvicorn
@@ -20,7 +21,6 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 SUPPORTED_PROTOCOL_VERSIONS: frozenset[str] = frozenset({"2025-11-25", "2025-03-26"})
-_LOCALHOST_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
 
 
 class MCPSecurityMiddleware:
@@ -28,7 +28,7 @@ class MCPSecurityMiddleware:
 
     Enforces three checks on every HTTP request:
     1. Optional bearer key authentication.
-    2. Origin validation (localhost only) to prevent DNS rebinding.
+    2. Origin validation (loopback origins only) to prevent DNS rebinding.
     3. Protocol version validation via MCP-Protocol-Version header.
 
     Implemented as pure ASGI (not BaseHTTPMiddleware) so that SSE streaming
@@ -59,7 +59,7 @@ class MCPSecurityMiddleware:
 
             # 2. Origin validation — prevents DNS rebinding attacks
             origin = headers.get("origin", "")
-            if origin and not _LOCALHOST_ORIGIN.match(origin):
+            if origin and not _is_loopback_origin(origin):
                 await Response("Forbidden", status_code=403)(scope, receive, send)
                 return
 
@@ -73,6 +73,26 @@ class MCPSecurityMiddleware:
                 return
 
         await self.app(scope, receive, send)
+
+
+def _is_loopback_origin(origin: str) -> bool:
+    """Return True when *origin* targets localhost or a loopback IP."""
+    parsed = urlparse(origin)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if parsed.params or parsed.query or parsed.fragment:
+        return False
+
+    hostname = parsed.hostname
+    if hostname == "localhost":
+        return True
+    if hostname is None:
+        return False
+
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
 
 
 def run_http_server(mcp: FastMCP, settings: Settings) -> None:

@@ -485,7 +485,7 @@ Each subsection defines the expected behaviours for a module. These serve as the
 - `auth_enabled=false` → auth disabled; requests without `Authorization` can proceed
 - `auth_enabled=false` → startup warning is logged
 - POST to `/mcp` with valid origin → 200
-- POST to `/mcp` with non-localhost origin → 403
+- POST to `/mcp` with non-loopback origin → 403
 - POST to `/mcp` with unknown `MCP-Protocol-Version` header → 400
 - `transport = "http"` in config starts uvicorn, `transport = "stdio"` starts stdio mode
 
@@ -690,7 +690,7 @@ async def app_state(indexes, sample_entries):
 - HTTP transport: `auth_enabled=true`, empty key → key auto-generated and logged
 - HTTP transport: `auth_enabled=false`, request without bearer key is allowed
 - HTTP transport: `auth_enabled=false`, startup warning logged
-- HTTP transport: non-localhost origin → 403
+- HTTP transport: non-loopback origin → 403
 - HTTP transport: unknown protocol version → 400
 
 **Coverage target**: 90% branch coverage (`branch = true` in `[tool.coverage.run]`). Branches covering network errors, cache misses, and config validation failures are explicitly tested via mocking — not left to chance.

@@ -988,11 +988,27 @@ Implemented as a **pure ASGI middleware** (not `BaseHTTPMiddleware`) so that SSE
 from starlette.datastructures import Headers
 from starlette.responses import Response
 from starlette.types import ASGIApp, Receive, Scope, Send
-import re
+import ipaddress
 import secrets
+from urllib.parse import urlparse
 
 SUPPORTED_PROTOCOL_VERSIONS = frozenset({"2025-11-25", "2025-03-26"})
-_LOCALHOST_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
+
+def _is_loopback_origin(origin: str) -> bool:
+    parsed = urlparse(origin)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if parsed.params or parsed.query or parsed.fragment:
+        return False
+    hostname = parsed.hostname
+    if hostname == "localhost":
+        return True
+    if hostname is None:
+        return False
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
 
 class MCPSecurityMiddleware:
     def __init__(self, app: ASGIApp, *, auth_enabled: bool, auth_key: str | None = None):
@@ -1013,7 +1029,7 @@ class MCPSecurityMiddleware:
 
             # 2. Origin validation — prevents DNS rebinding attacks
             origin = headers.get("origin", "")
-            if origin and not _LOCALHOST_ORIGIN.match(origin):
+            if origin and not _is_loopback_origin(origin):
                 await Response("Forbidden", status_code=403)(scope, receive, send)
                 return
 

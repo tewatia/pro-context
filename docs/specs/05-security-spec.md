@@ -164,7 +164,7 @@ Severity uses a simple scale: **Critical** (system compromise), **High** (securi
 **Controls**:
 
 - Optional bearer key authentication — when `server.auth_enabled=true`, all HTTP requests must include `Authorization: Bearer <key>`. If `server.auth_key` is empty, a key is auto-generated at startup. Requests with a missing or incorrect key are rejected with HTTP 401. A browser-based DNS rebinding attack cannot inject the `Authorization` header into cross-origin requests. (02-technical-spec, Section 8.2)
-- Origin validation in `MCPSecurityMiddleware`. Only `http://localhost` and `https://localhost` (with optional port) are permitted. Non-localhost origins are rejected with HTTP 403. (02-technical-spec, Section 8.2)
+- Origin validation in `MCPSecurityMiddleware`. Only loopback origins are permitted: `localhost`, `127.0.0.1`, and `[::1]` (with optional port). Non-loopback origins are rejected with HTTP 403. (02-technical-spec, Section 8.2)
 - Protocol version validation — requests with unknown `MCP-Protocol-Version` headers are rejected with HTTP 400. (02-technical-spec, Section 8.2)
 - Startup warning when `server.auth_enabled=false` to make unauthenticated deployment explicit in logs. (02-technical-spec, Section 8.2)
 
@@ -362,7 +362,7 @@ Each module introduces specific attack surface. The following tables map securit
 | `auth_enabled=false`                                                                             | Auth disabled; requests without `Authorization` are allowed and startup warning is logged |
 | Non-localhost `Origin` header                                                                    | Rejected with HTTP 403                                                                    |
 | Missing `Origin` header (with auth requirements satisfied)                                       | Allowed (standard for non-browser clients)                                                |
-| Various localhost formats (`127.0.0.1`, `localhost`, `[::1]`)                                    | Accepted or rejected per middleware regex                                                 |
+| Various localhost formats (`127.0.0.1`, `localhost`, `[::1]`)                                    | Accepted as loopback origins                                                              |
 | Unknown `MCP-Protocol-Version` header                                                            | Rejected with HTTP 400                                                                    |
 | Error response body                                                                              | No stack traces, internal file paths, or debug info leaked                                |
 
