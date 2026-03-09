@@ -14,6 +14,7 @@ import respx
 
 from procontext.cache import Cache
 from procontext.errors import ErrorCode, ProContextError
+from procontext.tools.read_outline import handle as read_outline_handle
 from procontext.tools.read_page import handle as read_page_handle
 from procontext.tools.resolve_library import handle
 from procontext.tools.search_page import handle as search_page_handle
@@ -303,42 +304,6 @@ class TestReadPageHandler:
         assert result["total_lines"] == 21
         assert result["outline"] != ""  # Outline still present
 
-    @respx.mock
-    async def test_view_outline_omits_content(self, app_state: AppState) -> None:
-        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
-
-        result = await read_page_handle(_SAMPLE_URL, 1, 500, app_state, view="outline")
-
-        assert "content" not in result
-        assert "outline" in result
-        assert "total_lines" in result
-        assert "# Streaming" in result["outline"]
-
-    @respx.mock
-    async def test_view_outline_total_lines_correct(self, app_state: AppState) -> None:
-        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
-
-        result = await read_page_handle(_SAMPLE_URL, 1, 500, app_state, view="outline")
-
-        assert result["total_lines"] == len(_SAMPLE_PAGE.splitlines())
-
-    @respx.mock
-    async def test_view_full_explicit_returns_content(self, app_state: AppState) -> None:
-        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
-
-        result = await read_page_handle(_SAMPLE_URL, 1, 500, app_state, view="full")
-
-        assert "content" in result
-        assert "# Streaming" in result["content"]
-
-    @respx.mock
-    async def test_view_default_is_full(self, app_state: AppState) -> None:
-        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
-
-        result = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
-
-        assert "content" in result
-
     # --- .md URL probing ---
 
     @respx.mock
@@ -576,6 +541,7 @@ class TestSearchPageHandler:
 
         result = await search_page_handle(_SAMPLE_URL, "xyzzy_nonexistent", app_state)
         assert result["matches"] == []
+        assert result["outline"] == ""
         assert result["has_more"] is False
         assert result["next_offset"] is None
 
@@ -625,3 +591,144 @@ class TestSearchPageHandler:
         with pytest.raises(ProContextError) as exc_info:
             await search_page_handle(evil_url, "test", app_state)
         assert exc_info.value.code == ErrorCode.URL_NOT_ALLOWED
+
+    @respx.mock
+    async def test_search_outline_trimmed_to_match_range(self, app_state: AppState) -> None:
+        """Outline should only contain entries within the match range."""
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        # Search for ".astream()" — appears only in lines 13-15 area
+        result = await search_page_handle(_SAMPLE_URL, ".astream()", app_state)
+        assert len(result["matches"]) > 0
+        outline = result["outline"]
+        # Outline should not contain headings far from the matches
+        # "# Streaming" at line 1 should NOT be in the trimmed outline
+        assert "# Streaming\n" not in outline or outline == ""
+
+
+class TestReadOutlineHandler:
+    """Full handler pipeline tests for read_outline."""
+
+    @respx.mock
+    async def test_basic_outline(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_outline_handle(_SAMPLE_URL, 1, 200, app_state)
+
+        assert result["url"] == _SAMPLE_URL
+        assert result["total_entries"] > 0
+        assert "# Streaming" in result["outline"]
+        assert result["cached"] is False
+
+    @respx.mock
+    async def test_output_contains_all_fields(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_outline_handle(_SAMPLE_URL, 1, 200, app_state)
+        assert set(result.keys()) == {
+            "url",
+            "outline",
+            "total_entries",
+            "has_more",
+            "next_offset",
+            "cached",
+            "cached_at",
+            "stale",
+        }
+
+    @respx.mock
+    async def test_pagination(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        # Request only 2 entries at a time
+        result = await read_outline_handle(_SAMPLE_URL, 1, 2, app_state)
+        assert result["outline"].count("\n") <= 1  # At most 2 entries (1 newline between)
+        assert result["has_more"] is True
+        assert result["next_offset"] is not None
+
+        # Continue from next_offset
+        result2 = await read_outline_handle(_SAMPLE_URL, result["next_offset"], 2, app_state)
+        assert result2["cached"] is True
+        assert result2["outline"] != result["outline"]
+
+    @respx.mock
+    async def test_offset_beyond_total_entries(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_outline_handle(_SAMPLE_URL, 9999, 200, app_state)
+        assert result["outline"] == ""
+        assert result["has_more"] is False
+        assert result["next_offset"] is None
+        assert result["total_entries"] > 0
+
+    @respx.mock
+    async def test_cache_shared_with_read_page(self, app_state: AppState) -> None:
+        """read_page populates cache, read_outline uses it."""
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+        assert respx.calls.call_count == 1
+
+        result = await read_outline_handle(_SAMPLE_URL, 1, 200, app_state)
+        assert result["cached"] is True
+        assert respx.calls.call_count == 1
+
+    async def test_url_not_allowed_raises(self, app_state: AppState) -> None:
+        evil_url = "https://evil.example.com/docs.md"
+        with pytest.raises(ProContextError) as exc_info:
+            await read_outline_handle(evil_url, 1, 200, app_state)
+        assert exc_info.value.code == ErrorCode.URL_NOT_ALLOWED
+
+    async def test_limit_over_500_raises(self, app_state: AppState) -> None:
+        with pytest.raises(ProContextError) as exc_info:
+            await read_outline_handle(_SAMPLE_URL, 1, 501, app_state)
+        assert exc_info.value.code == ErrorCode.INVALID_INPUT
+
+
+class TestReadPageCompaction:
+    """Tests for outline compaction in read_page output."""
+
+    @respx.mock
+    async def test_small_outline_not_compacted(self, app_state: AppState) -> None:
+        """Pages with ≤50 outline entries are returned as-is (no note)."""
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        result = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+        # _SAMPLE_PAGE has ~7 headings — well under 50
+        assert "[Compacted:" not in result["outline"]
+        assert "# Streaming" in result["outline"]
+
+    @respx.mock
+    async def test_large_outline_compacted_with_note(self, app_state: AppState) -> None:
+        """Pages with >50 outline entries get compacted with a note header."""
+        # Build a page with many headings at various depths
+        lines = ["# Main Title", ""]
+        for i in range(60):
+            lines.append(f"### Section {i}")
+            lines.append(f"Content for section {i}.")
+            lines.append("")
+        big_page = "\n".join(lines)
+        url = "https://python.langchain.com/docs/big-page.md"
+        respx.get(url).mock(return_value=httpx.Response(200, text=big_page))
+
+        result = await read_page_handle(url, 1, 500, app_state)
+        outline = result["outline"]
+        assert "[Compacted:" in outline
+        assert "read_outline" in outline
+
+    @respx.mock
+    async def test_irreducible_outline_shows_status_message(self, app_state: AppState) -> None:
+        """Pages with >50 H1/H2-only headings show the 'too large' message."""
+        lines = []
+        for i in range(55):
+            lines.append(f"## Section {i}")
+            lines.append(f"Content {i}.")
+            lines.append("")
+        big_page = "\n".join(lines)
+        url = "https://python.langchain.com/docs/huge-page.md"
+        respx.get(url).mock(return_value=httpx.Response(200, text=big_page))
+
+        result = await read_page_handle(url, 1, 500, app_state)
+        outline = result["outline"]
+        assert "[Outline too large" in outline
+        assert "read_outline" in outline

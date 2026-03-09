@@ -12,13 +12,19 @@ import structlog
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
+import procontext.tools.read_outline as t_read_outline
 import procontext.tools.read_page as t_read_page
 import procontext.tools.resolve_library as t_resolve
 import procontext.tools.search_page as t_search_page
 from procontext import __version__
 from procontext.errors import ProContextError
 from procontext.mcp.lifespan import lifespan
-from procontext.models.tools import ReadPageOutput, ResolveLibraryOutput, SearchPageOutput
+from procontext.models.tools import (
+    ReadOutlineOutput,
+    ReadPageOutput,
+    ResolveLibraryOutput,
+    SearchPageOutput,
+)
 
 if TYPE_CHECKING:
     from procontext.state import AppState
@@ -89,37 +95,24 @@ async def read_page(
         int,
         Field(description="Maximum number of content lines to return.", ge=1),
     ] = 500,
-    view: Annotated[
-        Literal["outline", "full"],
-        Field(
-            description=(
-                "outline: returns page outline and total_lines only, no page content. "
-                "full: returns page outline plus content window based on offset and limit."
-            )
-        ),
-    ] = "full",
 ) -> ReadPageOutput:
     """Fetch the outline and content of a documentation page.
 
     Accepts any documentation URL — typically the index_url from
     resolve_library or a link found within a previously fetched page.
 
-    Navigation patterns:
-      Pattern 1 (default) — call with view="full". Use outline line numbers
-      to identify the section you need, then call again with offset=<line>.
-
-      Pattern 2 — call with view="outline" across several candidate pages to
-      compare structure cheaply before committing to a full read.
+    Navigation: Use outline line numbers to identify the section you need,
+    then call again with offset=<line>. For pages with very large outlines,
+    use read_outline for paginated browsing.
 
     Response:
       url          — the URL of the fetched page
-      outline      — H1–H6 headings and fence markers with 1-based line
-                     numbers, e.g. "1: # Title\\n42: ## Usage". Always the
-                     full page outline regardless of offset/limit.
-      total_lines  — total line count of the full page; always present
+      outline      — compacted structural outline (target ≤50 entries) with
+                     1-based line numbers, e.g. "1:# Title\\n42:## Usage"
+      total_lines  — total line count of the full page
       offset       — 1-based line number where the content window starts
       limit        — maximum lines in the content window
-      content      — the content window (view="full" only; absent for view="outline")
+      content      — the content window
       has_more     — true if more content exists beyond the current window
       next_offset  — line number to pass as offset to continue; null if no more
       cached       — true if served from cache
@@ -131,14 +124,60 @@ async def read_page(
     """
     state: AppState = ctx.request_context.lifespan_context
     try:
-        return ReadPageOutput.model_validate(
-            await t_read_page.handle(url, offset, limit, state, view=view)
-        )
+        return ReadPageOutput.model_validate(await t_read_page.handle(url, offset, limit, state))
     except ProContextError as exc:
         log.warning("tool_error", tool="read_page", code=exc.code, message=exc.message)
         raise
     except Exception:
         log.error("tool_unexpected_error", tool="read_page", exc_info=True)
+        raise
+
+
+@mcp.tool()
+async def read_outline(
+    url: Annotated[
+        str,
+        Field(description="Documentation page URL."),
+    ],
+    ctx: Context,
+    offset: Annotated[
+        int,
+        Field(description="1-based outline entry index to start from.", ge=1),
+    ] = 1,
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of outline entries to return.", ge=1, le=500),
+    ] = 200,
+) -> ReadOutlineOutput:
+    """Browse the full outline of a documentation page with pagination.
+
+    Returns paginated outline entries (headings and fence markers with line
+    numbers). Use this when read_page reports that the outline is too large
+    for inline display, or when you need to browse the complete page structure.
+
+    Outline entries have empty fence pairs pre-stripped. Pagination uses
+    entry indices (not line numbers) — pass next_offset to continue browsing.
+
+    Response:
+      url           — the URL of the fetched page
+      outline       — paginated outline entries, e.g. "1:# Title\\n42:## Usage"
+      total_entries — total outline entries (after stripping empty fences)
+      has_more      — true if more entries exist beyond the current window
+      next_offset   — entry index to pass as offset to continue; null if no more
+      cached        — true if served from cache
+      cached_at     — ISO timestamp of last fetch; null for fresh network responses
+      stale         — true if cache entry is expired; background refresh in progress
+    """
+    state: AppState = ctx.request_context.lifespan_context
+    try:
+        return ReadOutlineOutput.model_validate(
+            await t_read_outline.handle(url, offset, limit, state)
+        )
+    except ProContextError as exc:
+        log.warning("tool_error", tool="read_outline", code=exc.code, message=exc.message)
+        raise
+    except Exception:
+        log.error("tool_unexpected_error", tool="read_outline", exc_info=True)
         raise
 
 
@@ -186,9 +225,9 @@ async def search_page(
 ) -> SearchPageOutput:
     """Search within a documentation page for lines matching a query.
 
-    Returns the page outline and matching lines with line numbers. Use the
-    outline and match locations to identify relevant sections, then call
-    read_page with the appropriate offset to read the full content.
+    Returns a compacted outline trimmed to the match range and matching lines
+    with line numbers. Use the outline and match locations to identify relevant
+    sections, then call read_page with the appropriate offset to read content.
 
     Supports literal and regex search, smart case sensitivity, and word
     boundary matching.
@@ -196,7 +235,7 @@ async def search_page(
     Response:
       url          — the URL that was searched
       query        — the search query as provided
-      outline      — full page outline (same as read_page)
+      outline      — compacted outline trimmed to match range; empty on zero matches
       matches      — list of {line_number, content} for matching lines
       total_lines  — total line count of the page
       has_more     — true if more matches exist beyond the returned set

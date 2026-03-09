@@ -1,8 +1,8 @@
 # ProContext: Implementation Guide
 
 > **Document**: 03-implementation-guide.md
-> **Status**: Draft v2
-> **Last Updated**: 2026-03-08
+> **Status**: Draft v3
+> **Last Updated**: 2026-03-10
 > **Depends on**: 01-functional-spec.md, 02-technical-spec.md
 
 ---
@@ -26,6 +26,7 @@
   - [4.4 Search](#44-search)
   - [4.5 HTTP Transport](#45-http-transport)
   - [4.6 Registry Updates](#46-registry-updates)
+  - [4.7 Outline](#47-outline)
 - [5. Testing Strategy](#5-testing-strategy)
 - [6. CI/CD](#6-cicd)
   - [Commit Message Convention](#commit-message-convention)
@@ -68,6 +69,7 @@ procontext/
 │       │   ├── resolve_library.py    # Business logic for resolve_library
 │       │   ├── read_page.py          # Business logic for read_page
 │       │   ├── search_page.py        # Business logic for search_page
+│       │   ├── read_outline.py       # Business logic for read_outline
 │       │   └── _shared.py            # Shared helper: fetch_or_cached_page (cache-check → fetch → cache-write → stale-refresh)
 │       ├── registry.py               # Registry loading, index building, disk persistence, update check
 │       ├── resolver.py               # 5-step resolution algorithm, fuzzy matching
@@ -75,6 +77,7 @@ procontext/
 │       ├── cache.py                  # SQLite cache: page_cache, stale-while-revalidate
 │       ├── schedulers.py             # Background coroutines: registry update scheduler, cache cleanup scheduler
 │       ├── parser.py                 # Outline parser, code block suppression, line number tracking
+│       ├── outline.py                # Outline structuring, compaction, match-range trimming, formatting
 │       ├── search.py                 # Pattern compilation (build_matcher) and line scanning (search_lines)
 │       ├── transport.py              # MCPSecurityMiddleware for HTTP mode
 │       └── data/
@@ -106,7 +109,7 @@ The structure enforces a strict layering. Violations (e.g., a tool importing fro
 | ------------------ | ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | **Entrypoint**     | `mcp/server.py`, `mcp/lifespan.py`, `mcp/startup.py` | Tool registrations, resource lifecycle, CLI entry. No business logic.                 |
 | **Tools**          | `tools/*.py`                                         | One file per tool. Receives `AppState`, returns output dict. Raises `ProContextError`. |
-| **Services**       | `resolver.py`, `fetcher.py`, `cache.py`, `parser.py`, `search.py` | Pure business logic. No MCP imports. Typed against protocols, not concrete classes.    |
+| **Services**       | `resolver.py`, `fetcher.py`, `cache.py`, `parser.py`, `outline.py`, `search.py` | Pure business logic. No MCP imports. Typed against protocols, not concrete classes.    |
 | **Infrastructure** | `registry.py`, `config.py`, `transport.py`, `schedulers.py` | Setup and wiring. Run once at startup; schedulers run as long-lived background coroutines. |
 | **Shared**         | `models/`, `errors.py`, `protocols.py`, `state.py`   | No dependencies on other layers. Imported freely.                                      |
 
@@ -438,7 +441,7 @@ Each subsection defines the expected behaviours for a module. These serve as the
 - SSRF: redirect to non-allowlisted domain raises `URL_NOT_ALLOWED`
 - Page is cached on first fetch; subsequent calls with different offsets are served from cache without re-fetch
 - `offset` and `limit` correctly window the content
-- `outline` always reflects the full page regardless of offset/limit or `view`
+- `outline` returned by `read_page` is compacted to ≤ 50 entries; if irreducible, replaced by a status message directing the agent to `read_outline`
 
 ---
 
@@ -467,7 +470,8 @@ Each subsection defines the expected behaviours for a module. These serve as the
 - Smart case: all-lowercase query → case-insensitive; mixed/upper → case-sensitive
 - `whole_word: true` wraps pattern in `\b...\b`
 - Pagination: `offset` skips lines, `max_results` limits output, `has_more`/`next_offset` enable continuation
-- Outline is returned alongside matches for structural context
+- Outline is trimmed to the match range (first match line → last match line) before compaction; zero matches → empty string
+- Outline compaction uses the same progressive reduction as `read_page` (≤ 50 entries target)
 - Page fetch uses the shared `fetch_or_cached_page` helper (same cache as `read_page`)
 
 ---
@@ -509,6 +513,26 @@ Each subsection defines the expected behaviours for a module. These serve as the
 - HTTP mode scheduler: transient failures use exponential backoff + jitter (1 minute to 60 minutes cap)
 - HTTP mode scheduler: after 8 consecutive transient failures, counter and backoff reset, cadence returns to 24 hours; next round gets a fresh set of fast-retry attempts
 - HTTP mode scheduler: semantic failures (checksum/metadata/schema) do not fast-retry and return to 24-hour cadence
+
+---
+
+### 4.7 Outline
+
+**Modules**: `outline.py`, `tools/read_outline.py`
+
+**Expected behaviours**:
+
+- `parse_outline_entries()` converts a raw outline string into structured `OutlineEntry` objects with correct `line_number`, `text`, `depth`, `is_fence`, and `in_fence` attributes
+- Fence tracking follows CommonMark rules: closer must use the same character as the opener and be at least as long; simple boolean toggle with char/length state
+- `strip_empty_fences()` removes fence pairs that contain zero heading entries
+- `compact_outline()` progressively strips: empty fences → H6 → H5 → fenced content (fence markers + headings inside fences) → H4 → H3, stopping as soon as entries ≤ 50
+- `compact_outline()` returns `None` if the outline cannot be reduced to ≤ 50 entries after all compaction stages
+- `trim_outline_to_range()` filters entries to those between a start and end line number (inclusive); used by `search_page` to trim to match range
+- `format_outline()` converts structured entries back to the formatted string (`"line_number:content\nline_number2:content2..."`)
+- `read_outline` tool returns paginated outline entries (offset = 1-based entry index, limit = max entries, default 200, max 500) with empty fences pre-stripped
+- `read_outline` with offset beyond total entries returns empty outline with correct metadata, not an error
+- `read_page` compacted outline replaces full outline in output; if irreducible, output contains status string `"[Outline too large (N entries). Use read_outline for paginated access.]"`
+- `search_page` outline is trimmed to match range then compacted; zero matches → empty string
 
 ---
 
@@ -676,14 +700,28 @@ async def app_state(indexes, sample_entries):
 - Edge case: no matches → empty list, `has_more=False`, `next_offset=None`
 - Edge case: empty content → empty list
 
+`tests/unit/test_outline.py`
+
+- `parse_outline_entries()`: structured entries with correct depth, fence state
+- Fence tracking: CommonMark rules (same char, at least as long)
+- `strip_empty_fences()`: empty fence pairs removed, non-empty fence pairs preserved
+- `compact_outline()`: progressive reduction respects stage order; stops at ≤ 50
+- `compact_outline()`: returns `None` when irreducible
+- `trim_outline_to_range()`: filters to line range, empty input → empty output
+- `format_outline()`: round-trips correctly from parsed entries
+
 `tests/integration/test_tools.py`
 
 - `resolve_library`: full call, correct output shape
 - `read_page`: cache miss path (mocked HTTP), cache hit path
 - `read_page`: URL not in allowlist raises `URL_NOT_ALLOWED`
+- `read_page`: compacted outline returned when entries > 50; status message when irreducible
+- `read_outline`: paginated outline with correct entry count and metadata
+- `read_outline`: offset beyond total entries returns empty outline, not an error
 - `search_page`: cache miss path (mocked HTTP), returns matches
 - `search_page`: cache hit path (shared with read_page), returns matches
 - `search_page`: invalid regex raises `INVALID_INPUT`
+- `search_page`: outline trimmed to match range; zero matches → empty outline string
 - HTTP transport: `auth_enabled=true`, explicit key, missing bearer key → 401
 - HTTP transport: `auth_enabled=true`, explicit key, incorrect bearer key → 401
 - HTTP transport: `auth_enabled=true`, explicit key, valid bearer key → 200

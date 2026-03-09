@@ -53,7 +53,7 @@ ProContext implements the [Model Context Protocol](https://modelcontextprotocol.
 
 **HTTP transport**: JSON-RPC messages are sent as HTTP POST to `/mcp`. Server-sent events (SSE) are streamed as HTTP GET from `/mcp`. Session identity is tracked via the `MCP-Session-Id` header.
 
-Both transports expose the identical set of tools. MCP resources are planned but not yet implemented (see Section 5).
+Both transports expose the identical set of tools. MCP resources are planned but not yet implemented (see Section 6).
 
 ---
 
@@ -398,7 +398,7 @@ An empty `matches` list is a valid, non-error outcome. The library is simply not
 ```json
 {
   "name": "read_page",
-  "description": "Fetch a documentation page, llms.txt index, or README from a URL. Two views: view=\"full\" (default) returns the outline and a content window; view=\"outline\" returns the outline and total_lines only. The outline lists every H1–H6 heading and fence marker with its 1-based line number. Use view=\"outline\" to scan structure across candidate pages, then call with view=\"full\" and offset=<line number> to jump to the relevant section. Use search_page to find specific content by keyword.",
+  "description": "Fetch a documentation page, llms.txt index, or README from a URL. Returns a compacted outline (≤50 entries) and a content window. The outline lists H1–H6 headings with line numbers. Use outline line numbers to jump to sections with offset. For pages with very large outlines, use read_outline for paginated browsing. Use search_page to find specific content by keyword.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -407,23 +407,17 @@ An empty `matches` list is a valid, non-error outcome. The library is simply not
         "description": "URL to read. Typically from resolve_library output (index_url, readme_url) or from links found in a documentation index. Must use http or https. Must be a domain from the library registry. If the URL does not end with .md, the server tries url+\".md\" first; on any failure it falls back to the original URL.",
         "maxLength": 2048
       },
-      "view": {
-        "type": "string",
-        "enum": ["full", "outline"],
-        "default": "full",
-        "description": "\"full\" returns the outline plus a content window. \"outline\" returns the outline and total_lines only, without page content."
-      },
       "offset": {
         "type": "integer",
         "minimum": 1,
         "default": 1,
-        "description": "1-based line number to start reading from. Defaults to 1. Use a heading's line number to jump directly to that section. Only used when view=\"full\"."
+        "description": "1-based line number to start reading from. Defaults to 1. Use a heading's line number to jump directly to that section."
       },
       "limit": {
         "type": "integer",
         "minimum": 1,
         "default": 500,
-        "description": "Maximum number of lines to return from the offset. Defaults to 500. Only used when view=\"full\"."
+        "description": "Maximum number of lines to return from the offset. Defaults to 500."
       }
     },
     "required": ["url"]
@@ -432,11 +426,11 @@ An empty `matches` list is a valid, non-error outcome. The library is simply not
 ```
 
 **Navigation workflow**:
-1. Call with `view="outline"` to inspect the page structure without fetching content.
+1. Call `read_page` to get the compacted outline and the first 500 lines.
 2. Find the heading closest to the section you need and note its line number.
-3. Call again with `view="full"` and `offset=<that line number>` to read the section.
+3. Call again with `offset=<that line number>` to read the section.
 
-For short pages or when you need the full content in one call, omit `view` (defaults to `"full"`).
+For pages where the outline is replaced by a status message (very large pages), use `read_outline` to browse the full outline with pagination.
 
 ### 3.2 Output Schema
 
@@ -450,7 +444,7 @@ For short pages or when you need the full content in one call, omit `view` (defa
     },
     "outline": {
       "type": "string",
-      "description": "Plain-text structural outline of the full page (always complete, regardless of view/offset/limit). Each line is formatted as '<line_number>: <original line>' where line_number is 1-based. Includes H1–H6 headings (including blockquote headings such as '> ## Section'), headings inside fenced code blocks, and fence opener/closer lines."
+      "description": "Compacted structural outline of the page (target ≤50 entries). Progressive depth reduction removes lower-priority headings. When the page outline is too large even after maximum compaction, contains a status message directing to read_outline. Each entry formatted as '<line_number>:<original line>'."
     },
     "total_lines": {
       "type": "integer",
@@ -466,7 +460,7 @@ For short pages or when you need the full content in one call, omit `view` (defa
     },
     "content": {
       "type": "string",
-      "description": "Page markdown for the requested window (from offset, up to limit lines). Present only when view=\"full\". Absent when view=\"outline\"."
+      "description": "Page markdown for the requested window (from offset, up to limit lines)."
     },
     "has_more": {
       "type": "boolean",
@@ -480,13 +474,13 @@ For short pages or when you need the full content in one call, omit `view` (defa
     "cached_at": { "type": ["string", "null"], "format": "date-time" },
     "stale": { "type": "boolean" }
   },
-  "required": ["url", "outline", "total_lines", "offset", "limit", "has_more", "next_offset", "cached", "cached_at", "stale"]
+  "required": ["url", "outline", "total_lines", "offset", "limit", "content", "has_more", "next_offset", "cached", "cached_at", "stale"]
 }
 ```
 
-**Outline**: Always reflects the full page regardless of `view`, `offset`, or `limit`. The outline and full content are cached together so subsequent calls with different views or offsets don't re-fetch.
+**Outline compaction**: The outline is compacted to ≤50 entries by progressively removing lower-priority headings (H6 → H5 → fenced content → H4 → H3). If even H1/H2 exceed 50 entries, the field contains a status message. The full outline and content are cached together so subsequent calls with different offsets don't re-fetch.
 
-**Cache sharing**: `read_page` and `search_page` share the same `page_cache`. A page fetched by one tool is immediately available to the other without a re-fetch.
+**Cache sharing**: `read_page`, `search_page`, and `read_outline` share the same `page_cache`. A page fetched by any tool is immediately available to the others without a re-fetch.
 
 ### 3.3 Examples
 
@@ -503,7 +497,7 @@ Result:
 ```json
 {
   "url": "https://python.langchain.com/llms.txt",
-  "outline": "1: # Docs by LangChain\n3: ## Concepts\n15: ## How-to Guides\n28: ## API Reference",
+  "outline": "1:# Docs by LangChain\n3:## Concepts\n15:## How-to Guides\n28:## API Reference",
   "total_lines": 45,
   "offset": 1,
   "limit": 500,
@@ -516,32 +510,7 @@ Result:
 }
 ```
 
-**Scan structure only (`view="outline"`)**:
-
-Request arguments:
-
-```json
-{ "url": "https://docs.langchain.com/docs/concepts/streaming.md", "view": "outline" }
-```
-
-Result:
-
-```json
-{
-  "url": "https://docs.langchain.com/docs/concepts/streaming.md",
-  "outline": "1: # Streaming\n3: ## Overview\n12: ## Streaming with Chat Models\n18: ### Using .stream()\n27: ### Using .astream()\n35: ## Streaming with Chains",
-  "total_lines": 42,
-  "offset": 1,
-  "limit": 500,
-  "has_more": false,
-  "next_offset": null,
-  "cached": false,
-  "cached_at": null,
-  "stale": false
-}
-```
-
-**Jump to a section using offset (`view="full"`, default)**:
+**Jump to a section using offset**:
 
 Request arguments:
 
@@ -554,7 +523,7 @@ Result:
 ```json
 {
   "url": "https://docs.langchain.com/docs/concepts/streaming.md",
-  "outline": "1: # Streaming\n3: ## Overview\n12: ## Streaming with Chat Models\n18: ### Using .stream()\n27: ### Using .astream()\n35: ## Streaming with Chains",
+  "outline": "1:# Streaming\n3:## Overview\n12:## Streaming with Chat Models\n18:### Using .stream()\n27:### Using .astream()\n35:## Streaming with Chains",
   "total_lines": 42,
   "offset": 18,
   "limit": 10,
@@ -566,8 +535,6 @@ Result:
   "stale": false
 }
 ```
-
-Note: `outline` is identical across all responses for the same URL — it always covers the full page.
 
 ### 3.4 Error Cases
 
@@ -581,7 +548,6 @@ Note: `outline` is identical across all responses for the same URL — it always
 | Redirect leads to non-allowlisted domain | `URL_NOT_ALLOWED`   | `false`       |
 | URL over 2048 characters                 | `INVALID_INPUT`      | `false`       |
 | `offset` < 1 or `limit` < 1             | `INVALID_INPUT`      | `false`       |
-| `view` not `"full"` or `"outline"`       | `INVALID_INPUT`      | `false`       |
 
 **`URL_NOT_ALLOWED` example**:
 
@@ -677,7 +643,7 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
     },
     "outline": {
       "type": "string",
-      "description": "Plain-text structural outline of the full page (identical to read_page outline). Gives the agent structural context for interpreting match locations."
+      "description": "Compacted structural outline trimmed to the match range (first match line to last match line). Empty string when no matches found. When the trimmed outline exceeds 50 entries even after maximum compaction, contains a status message directing to read_outline."
     },
     "matches": {
       "type": "array",
@@ -732,7 +698,7 @@ Result:
 {
   "url": "https://python.langchain.com/llms.txt",
   "query": "streaming",
-  "outline": "1: # Docs by LangChain\n3: ## Concepts\n15: ## How-to Guides\n28: ## API Reference",
+  "outline": "3:## Concepts\n15:## How-to Guides",
   "matches": [
     { "line_number": 7, "content": "- [Streaming](https://docs.langchain.com/docs/concepts/streaming.md): Stream model outputs as they are generated." },
     { "line_number": 22, "content": "- [How to stream responses](https://docs.langchain.com/docs/how_to/streaming.md): Step-by-step guide to streaming." }
@@ -759,7 +725,7 @@ Result:
 {
   "url": "https://docs.pydantic.dev/concepts/models.md",
   "query": "model",
-  "outline": "1: # Models\n5: ## Defining a Model\n20: ## Model Methods\n35: ## Nested Models\n50: ## Model Configuration",
+  "outline": "1:# Models\n5:## Defining a Model",
   "matches": [
     { "line_number": 1, "content": "# Models" },
     { "line_number": 5, "content": "## Defining a Model" },
@@ -800,7 +766,128 @@ Result contains the next batch of matches starting from line 8.
 
 ---
 
-## 5. Resource: session/libraries
+## 5. Tool: read_outline
+
+**Purpose**: Browse the full structural outline of a documentation page with pagination. Use when `read_page` or `search_page` return an outline status message indicating the page outline is too large, or to explore page structure without fetching content.
+
+### 5.1 Input Schema
+
+```json
+{
+  "name": "read_outline",
+  "description": "Browse the full structural outline of a documentation page with pagination. Each entry shows a heading or fence marker with its line number in the page content. Use when read_page returns an outline status message for very large pages, or to explore page structure without fetching content.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "URL of the page. Same URLs accepted by read_page.",
+        "maxLength": 2048
+      },
+      "offset": {
+        "type": "integer",
+        "minimum": 1,
+        "default": 1,
+        "description": "1-based outline entry index to start from."
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500,
+        "default": 200,
+        "description": "Maximum number of outline entries to return."
+      }
+    },
+    "required": ["url"]
+  }
+}
+```
+
+### 5.2 Output Schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "The URL of the page."
+    },
+    "outline": {
+      "type": "string",
+      "description": "Paginated outline entries in '<line_number>:<original line>' format, joined by newlines."
+    },
+    "total_entries": {
+      "type": "integer",
+      "description": "Total number of entries in the full outline (after stripping empty fences)."
+    },
+    "has_more": {
+      "type": "boolean",
+      "description": "True if more entries exist beyond the current window."
+    },
+    "next_offset": {
+      "type": ["integer", "null"],
+      "description": "Entry index to pass as offset to continue paginating. Null if no more entries."
+    },
+    "cached": { "type": "boolean" },
+    "cached_at": { "type": ["string", "null"], "format": "date-time" },
+    "stale": { "type": "boolean" }
+  },
+  "required": ["url", "outline", "total_entries", "has_more", "next_offset", "cached", "cached_at", "stale"]
+}
+```
+
+### 5.3 Examples
+
+**Browse the outline of a large API reference**:
+
+Request arguments:
+
+```json
+{ "url": "https://docs.langchain.com/docs/api_reference.md" }
+```
+
+Result:
+
+```json
+{
+  "url": "https://docs.langchain.com/docs/api_reference.md",
+  "outline": "1:# API Reference\n5:## Authentication\n12:### API Keys\n28:### OAuth\n45:## Endpoints\n...",
+  "total_entries": 847,
+  "has_more": true,
+  "next_offset": 201,
+  "cached": true,
+  "cached_at": "2026-02-23T10:00:00Z",
+  "stale": false
+}
+```
+
+**Paginated continuation**:
+
+Request arguments:
+
+```json
+{ "url": "https://docs.langchain.com/docs/api_reference.md", "offset": 201, "limit": 200 }
+```
+
+Result contains entries 201–400 with `has_more: true` and `next_offset: 401`.
+
+### 5.4 Error Cases
+
+| Condition                                | Error code           | `recoverable` |
+| ---------------------------------------- | -------------------- | ------------- |
+| URL domain not in allowlist              | `URL_NOT_ALLOWED`    | `false`       |
+| URL scheme not http/https                | `INVALID_INPUT`      | `false`       |
+| HTTP 404 for the URL                     | `PAGE_NOT_FOUND`     | `false`       |
+| Network error or non-200/404 response    | `PAGE_FETCH_FAILED`  | `true`        |
+| Redirect chain exceeding 3 hops         | `TOO_MANY_REDIRECTS` | `false`       |
+| URL over 2048 characters                 | `INVALID_INPUT`      | `false`       |
+| `offset` < 1                             | `INVALID_INPUT`      | `false`       |
+| `limit` < 1 or `limit` > 500            | `INVALID_INPUT`      | `false`       |
+
+---
+
+## 6. Resource: session/libraries
 
 > **Status**: Planned — not yet implemented. The server currently registers no MCP resources. This section documents the intended design for a future release.
 
@@ -919,9 +1006,9 @@ Response:
 
 ---
 
-## 6. Error Reference
+## 7. Error Reference
 
-### 6.1 Error Envelope
+### 7.1 Error Envelope
 
 All tool-level errors share the same envelope:
 
@@ -945,14 +1032,14 @@ All tool-level errors share the same envelope:
 
 This envelope is returned inside the MCP `result` content with `isError: true` — not as a JSON-RPC protocol error.
 
-### 6.2 Error Code Catalogue
+### 7.2 Error Code Catalogue
 
 | Code                    | Raised by                    | Description                                                                                    | `recoverable` |
 | ----------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------- | ------------- |
-| `PAGE_NOT_FOUND`        | `read_page`, `search_page`   | HTTP 404 for the requested URL                                                                 | `false`       |
-| `PAGE_FETCH_FAILED`     | `read_page`, `search_page`   | Network error, timeout, or non-200/404 HTTP response (excluding redirect exhaustion)           | `true`        |
-| `TOO_MANY_REDIRECTS`    | `read_page`, `search_page`   | Redirect chain exceeded the 3-hop safety limit                                                 | `false`       |
-| `URL_NOT_ALLOWED`       | `read_page`, `search_page`   | URL domain is not in the SSRF allowlist, or is a private IP range                              | `false`       |
+| `PAGE_NOT_FOUND`        | `read_page`, `search_page`, `read_outline` | HTTP 404 for the requested URL                                                                 | `false`       |
+| `PAGE_FETCH_FAILED`     | `read_page`, `search_page`, `read_outline` | Network error, timeout, or non-200/404 HTTP response (excluding redirect exhaustion)           | `true`        |
+| `TOO_MANY_REDIRECTS`    | `read_page`, `search_page`, `read_outline` | Redirect chain exceeded the 3-hop safety limit                                                 | `false`       |
+| `URL_NOT_ALLOWED`       | `read_page`, `search_page`, `read_outline` | URL domain is not in the SSRF allowlist, or is a private IP range                              | `false`       |
 | `INVALID_INPUT`         | Any tool                     | Input failed Pydantic validation (empty query, URL too long, invalid regex pattern, etc.)      | `false`       |
 
 **On `recoverable: true`**: The same request may succeed if retried after a brief delay. Network errors and upstream failures are the typical cause. The agent should inform the user rather than retry indefinitely.
@@ -961,9 +1048,9 @@ This envelope is returned inside the MCP `result` content with `isError: true` �
 
 ---
 
-## 7. Transport Reference
+## 8. Transport Reference
 
-### 7.1 stdio Transport
+### 8.1 stdio Transport
 
 **How it works**: The MCP client spawns ProContext as a subprocess. Messages are newline-delimited JSON over stdin/stdout. stderr is reserved for structured log output (does not affect the JSON-RPC stream).
 
@@ -1008,7 +1095,7 @@ Settings can also be passed as environment variables using the `PROCONTEXT__` pr
 
 ---
 
-### 7.2 HTTP Transport
+### 8.2 HTTP Transport
 
 **Endpoint**: `POST /mcp` for JSON-RPC requests, `GET /mcp` for SSE streams.
 
@@ -1050,7 +1137,7 @@ PROCONTEXT__SERVER__TRANSPORT=http uv run procontext
 
 3. **Protocol version validation**: If `MCP-Protocol-Version` is present and not in `{"2025-11-25", "2025-03-26"}`, the server returns HTTP 400.
 
-4. **SSRF protection**: Applies to all documentation fetches, regardless of transport mode (see Section 6.2, `URL_NOT_ALLOWED`).
+4. **SSRF protection**: Applies to all documentation fetches, regardless of transport mode (see Section 7.2, `URL_NOT_ALLOWED`).
 
 **Example POST request**:
 
@@ -1073,7 +1160,7 @@ Used for server-initiated notifications. Connect once per session; the server se
 
 ---
 
-## 8. Versioning Policy
+## 9. Versioning Policy
 
 ### Server Version
 

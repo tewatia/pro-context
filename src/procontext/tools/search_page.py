@@ -13,6 +13,14 @@ import structlog
 
 from procontext.errors import ErrorCode, ProContextError
 from procontext.models.tools import LineMatchOutput, SearchPageInput, SearchPageOutput
+from procontext.outline import (
+    build_compaction_note,
+    compact_outline,
+    format_outline,
+    parse_outline_entries,
+    strip_empty_fences,
+    trim_outline_to_range,
+)
 from procontext.search import build_matcher, search_lines
 from procontext.tools._shared import fetch_or_cached_page
 
@@ -83,14 +91,17 @@ async def handle(
 
     total_lines = len(result.content.splitlines())
 
+    # Build compacted outline trimmed to match range
+    matches = [
+        LineMatchOutput(line_number=m.line_number, content=m.content) for m in search_result.matches
+    ]
+    outline = _compact_search_outline(result.outline, matches)
+
     output = SearchPageOutput(
         url=result.url,
         query=validated.query,
-        outline=result.outline,
-        matches=[
-            LineMatchOutput(line_number=m.line_number, content=m.content)
-            for m in search_result.matches
-        ],
+        outline=outline,
+        matches=matches,
         total_lines=total_lines,
         has_more=search_result.has_more,
         next_offset=search_result.next_offset,
@@ -98,3 +109,30 @@ async def handle(
         cached_at=result.cached_at,
     )
     return output.model_dump(mode="json")
+
+
+def _compact_search_outline(raw_outline: str, matches: list[LineMatchOutput]) -> str:
+    """Trim outline to match range and compact for search_page output."""
+    if not matches:
+        return ""
+
+    entries = parse_outline_entries(raw_outline)
+    entries = strip_empty_fences(entries)
+    total_entries = len(entries)
+
+    # Trim to match range
+    first_line = matches[0].line_number
+    last_line = matches[-1].line_number
+    trimmed = trim_outline_to_range(entries, first_line, last_line)
+
+    if len(trimmed) <= 50:
+        return format_outline(trimmed)
+
+    compacted = compact_outline(trimmed)
+    if compacted is None:
+        return (
+            f"[Outline too large ({total_entries} entries). Use read_outline for paginated access.]"
+        )
+
+    note = build_compaction_note(compacted, total_entries, match_range=(first_line, last_line))
+    return note + "\n" + format_outline(compacted)

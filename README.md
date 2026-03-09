@@ -100,7 +100,7 @@ resolve_library({ "query": "langchain>=0.2" })
 read_page({ "url": "https://python.langchain.com/llms.txt" })
 
 → {
-    "outline": "1: # LangChain\n3: ## Concepts\n15: ## How-to Guides\n...",
+    "outline": "1:# LangChain\n3:## Concepts\n15:## How-to Guides\n...",
     "total_lines": 45,
     "content": "# LangChain\n\n## Concepts\n- [Chat Models](https://...)\n..."
   }

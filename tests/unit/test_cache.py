@@ -22,7 +22,7 @@ class TestPageCache:
             url="https://example.com/docs/page1",
             url_hash="abc123",
             content="# Page 1",
-            outline="1: # Page 1",
+            outline="1:# Page 1",
             ttl_hours=24,
         )
         entry = await cache.get_page("abc123")
@@ -30,7 +30,7 @@ class TestPageCache:
         assert entry.url == "https://example.com/docs/page1"
         assert entry.url_hash == "abc123"
         assert entry.content == "# Page 1"
-        assert entry.outline == "1: # Page 1"
+        assert entry.outline == "1:# Page 1"
         assert entry.stale is False
 
     async def test_get_nonexistent_returns_none(self, cache: Cache) -> None:
@@ -76,7 +76,7 @@ class TestPageCache:
             url="https://example.com/docs/page1",
             url_hash="h1",
             content="# Page",
-            outline="1: # Page",
+            outline="1:# Page",
             ttl_hours=24,
             discovered_domains=domains,
         )

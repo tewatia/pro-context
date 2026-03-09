@@ -69,7 +69,7 @@
 │                                                     │
 │  ┌──────────────────────────────────────────────┐   │
 │  │  Tools                                       │   │
-│  │  resolve_library │ read_page │ search_page  │   │
+│  │  resolve_library │ read_page │ search_page │ read_outline │   │
 │  └────────────────────────┬─────────────────────┘   │
 │                           │                         │
 │  ┌────────────────────────▼─────────────────────┐   │
@@ -110,6 +110,7 @@ read_page("https://python.langchain.com/llms.txt")
   ├─ Fetch: HTTP GET url (30s timeout, SSRF validated per redirect)
   ├─ Store: page_cache (TTL 24h)
   ├─ Parse: extract outline (H1–H6, fence lines, line numbers)
+  ├─ Compact outline (progressive depth reduction → ≤50 entries, or status message)
   └─ Return: { outline: "...", content: "...", has_more: bool }
 
 search_page("https://python.langchain.com/llms.txt", "streaming")
@@ -120,7 +121,20 @@ search_page("https://python.langchain.com/llms.txt", "streaming")
   │    MISS → fetch and cache (same path as read_page)
   ├─ Build matcher from query + mode + case_mode + whole_word
   ├─ Scan lines from offset, collect up to max_results matches
+  ├─ Trim outline to match range (first match line → last match line)
+  ├─ Compact trimmed outline (progressive depth reduction → ≤50 entries)
   └─ Return: { outline: "...", matches: [...], has_more: bool }
+
+read_outline("https://python.langchain.com/llms.txt", offset=1, limit=200)
+  │
+  ├─ SSRF check: domain in allowlist?
+  ├─ Cache check: page:{sha256(url)} — shared cache with read_page/search_page
+  │    HIT  → use cached outline
+  │    MISS → fetch and cache (same path as read_page)
+  ├─ Parse outline string into structured entries
+  ├─ Strip empty fences (fence pairs with no headings inside)
+  ├─ Paginate: slice entries by offset/limit
+  └─ Return: { outline: "...", total_entries: int, has_more: bool }
 ```
 
 ---
@@ -185,7 +199,7 @@ class LibraryMatch(BaseModel):
     description: str          # Short description of what the library does
     languages: list[str]
     index_url: str             # URL to the library's llms.txt documentation index
-    readme_url: str | None    # URL to the library's README file
+    readme_url: str | None    # URL to the library's README file (typically raw content from GitHub)
     matched_via: Literal["package_name", "library_id", "alias", "fuzzy"]
     relevance: float          # 0.0–1.0
 ```
@@ -200,14 +214,14 @@ class PageCacheEntry(BaseModel):
     url: str
     url_hash: str             # SHA-256 of url (primary key)
     content: str              # Full page markdown (llms.txt, README, or docs)
-    outline: str              # Plain-text structural outline: "<line>: <original line>\n..."
+    outline: str              # Plain-text structural outline: "<line>:<original line>\n..."
     fetched_at: datetime
     expires_at: datetime
     stale: bool = False
     discovered_domains: frozenset[str] = frozenset()  # Base domains extracted from content URLs
 ```
 
-All fetched content — llms.txt indexes, README files, and documentation pages — is stored in a single `page_cache` table. Both `read_page` and `search_page` share this cache.
+All fetched content — llms.txt indexes, README files, and documentation pages — is stored in a single `page_cache` table. All three page tools (`read_page`, `search_page`, `read_outline`) share this cache.
 
 ### 3.3 Tool Input/Output Models
 
@@ -232,7 +246,6 @@ class ReadPageInput(BaseModel):
     url: str
     offset: int = 1
     limit: int = 500
-    view: Literal["outline", "full"] = "full"
 
     @field_validator("url")
     @classmethod
@@ -260,11 +273,11 @@ class ReadPageInput(BaseModel):
 
 class ReadPageOutput(BaseModel):
     url: str
-    outline: str              # Plain-text structural outline: "<line>: <original line>\n..."
+    outline: str              # Compacted outline (≤50 entries) or status message if too large
     total_lines: int
     offset: int
     limit: int
-    content: str | None       # Page markdown for the requested window; None when view="outline"
+    content: str              # Page markdown for the requested window
     has_more: bool             # True if more content exists beyond the current window
     next_offset: int | None    # Line number to pass as offset to continue; None if no more
     cached: bool
@@ -321,13 +334,31 @@ class LineMatch(BaseModel):
 class SearchPageOutput(BaseModel):
     url: str
     query: str
-    outline: str              # Same outline as read_page
+    outline: str              # Compacted outline trimmed to match range; empty string if no matches
     matches: list[LineMatch]
     total_lines: int
     has_more: bool
     next_offset: int | None   # Line number for next search call; None if no more matches
     cached: bool
     cached_at: datetime | None
+
+class ReadOutlineInput(BaseModel):
+    url: str
+    offset: int = 1           # 1-based outline entry index
+    limit: int = 200          # Max entries to return (1–500)
+
+    # Same url validator as ReadPageInput
+    # offset >= 1, 1 <= limit <= 500
+
+class ReadOutlineOutput(BaseModel):
+    url: str
+    outline: str              # Paginated outline entries: "<line>:<text>\n..."
+    total_entries: int        # Total entries after stripping empty fences
+    has_more: bool
+    next_offset: int | None   # Entry index to continue; None if no more
+    cached: bool
+    cached_at: datetime | None
+    stale: bool = False
 ```
 
 ### 3.4 Error Model
@@ -737,7 +768,7 @@ CREATE TABLE IF NOT EXISTS server_metadata (
 
 The `server_metadata` table stores operational state such as the last cleanup timestamp. It is a simple key-value store.
 
-All fetched content — llms.txt indexes, README files, and documentation pages — is stored in a single `page_cache` table. Both `read_page` and `search_page` share this cache.
+All fetched content — llms.txt indexes, README files, and documentation pages — is stored in a single `page_cache` table. All three page tools (`read_page`, `search_page`, `read_outline`) share this cache.
 
 **Why TEXT for timestamps**: SQLite has no native datetime type. ISO 8601 strings (`"2026-02-23T10:00:00Z"`) sort lexicographically as datetimes, making range queries on `expires_at` correct without any conversion.
 
@@ -801,19 +832,19 @@ async def set_page(self, url: str, url_hash: str, ...) -> None:
 
 ---
 
-## 7. Outline Parser
+## 7. Outline Parser & Compaction
 
-The outline parser is used exclusively by `read_page`. It produces a plain-text structural map with 1-based line numbers for headings and fenced code block boundaries. Defined in `src/procontext/parser.py`.
+The outline parser produces a plain-text structural map with 1-based line numbers for headings and fenced code block boundaries. The raw outline is generated by `src/procontext/parser.py` and cached alongside page content. Outline compaction and formatting are handled by `src/procontext/outline.py`.
 
-The output format is a newline-separated string where each line is `<line_number>: <original line>`, e.g.:
+The output format is a newline-separated string where each line is `<line_number>:<original line>`, e.g.:
 
 ```
-1: # Authenticate
-5: ## OpenAPI
-7: ````yaml https://api.example.com/openapi.json
-14:     ## Authentication
-22: ````
-25: ## Next Section
+1:# Authenticate
+5:## OpenAPI
+7:````yaml https://api.example.com/openapi.json
+14:    ## Authentication
+22:````
+25:## Next Section
 ```
 
 Fence opener/closer lines are included so the agent can determine which heading-like lines belong to code block content vs. structural page sections. The agent reads line numbers from the map and passes them as `offset` to `read_page` for targeted section reads.
@@ -853,6 +884,62 @@ for lineno, line in enumerate(content.splitlines(), start=1):
 - HTML headings (`<h2>`): Essentially absent from markdown documentation pages
 - Setext-style headings (`===` / `---` underlines): Rare in practice, ambiguous with horizontal rules
 - Deeply nested blockquotes (`>> ## heading`): The `(?:>\s*)?` prefix matches a single `>` only
+
+### 7.2 Structured Outline Entries
+
+The raw outline string is parsed into structured entries for compaction and filtering. Defined in `src/procontext/outline.py`.
+
+```python
+@dataclass(frozen=True)
+class OutlineEntry:
+    line_number: int      # 1-based line number in the source content
+    text: str             # The original line text (e.g., "## Usage" or "```python")
+    depth: int | None     # 1 for H1, 2 for H2, ... 6 for H6; None for fence lines
+    is_fence: bool        # True for fence opener/closer
+    in_fence: bool        # True if this entry is inside a fenced code block
+```
+
+`parse_outline_entries(outline_string: str) -> list[OutlineEntry]` parses the cached `"<lineno>:<original line>"` format into structured entries in a single pass:
+
+1. Split the outline string by newlines
+2. For each line, extract `line_number` by splitting on the first `:`
+3. Determine `is_fence` by matching `_FENCE_RE` against the text
+4. Determine `depth` by matching `_HEADING_RE` and counting `#` characters; `None` for fence lines
+5. Track fence state using CommonMark rules: when a fence opener is seen, record its character (`` ` `` or `~`) and length. A closer must use the same character and be at least as long. This enables `in_fence` tagging on each entry.
+
+### 7.3 Empty Fence Stripping
+
+`strip_empty_fences(entries: list[OutlineEntry]) -> list[OutlineEntry]`
+
+Pre-processing step used by both compaction (read_page, search_page) and the read_outline tool. Fence markers exist in the outline solely to disambiguate headings inside code blocks from structural headings. Fence pairs that contain zero heading entries add no navigational value and are removed.
+
+Algorithm: single pass, tracking fence opener positions. When a closer is found, check if any heading entries exist between the opener and closer. If none, remove the opener, closer, and any entries between them (there shouldn't be any, but guard against it).
+
+### 7.4 Outline Compaction
+
+`compact_outline(entries: list[OutlineEntry], max_entries: int = 50) -> list[OutlineEntry] | None`
+
+Progressive reduction applied to the outline for `read_page` and `search_page` responses. Removes entries in priority order, stopping as soon as the entry count drops to or below `max_entries`:
+
+1. Remove entries where `depth == 6` (H6 headings)
+2. Remove entries where `depth == 5` (H5 headings)
+3. Remove all entries where `in_fence == True` (headings inside fenced blocks) and their enclosing fence markers
+4. Remove entries where `depth == 4` (H4 headings)
+5. Remove entries where `depth == 3` (H3 headings)
+
+If the entry count still exceeds `max_entries` after all reductions (only H1/H2 remain), returns `None`. The caller renders a status message: `"[Outline too large (N entries). Use read_outline for paginated access.]"`
+
+### 7.5 Match-Range Trimming
+
+`trim_outline_to_range(entries: list[OutlineEntry], first_line: int, last_line: int) -> list[OutlineEntry]`
+
+Used by `search_page` before compaction. Filters entries to those with `line_number` between `first_line` and `last_line` (inclusive). When zero matches are found, the caller skips trimming and compaction entirely and returns an empty outline string.
+
+### 7.6 Formatting
+
+`format_outline(entries: list[OutlineEntry]) -> str`
+
+Converts structured entries back to the `"<lineno>:<text>"` format, joined by newlines. Used at the output boundary for all tools that return outline content.
 
 ---
 

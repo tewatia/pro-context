@@ -38,7 +38,7 @@ ProContext is an open-source MCP (Model Context Protocol) server that connects A
 
 **Agent-driven navigation.** ProContext does not try to guess which documentation is relevant to an agent's task. It gives the agent the tools to navigate documentation themselves — see what sections exist, fetch the ones that matter.
 
-**Minimal footprint.** The server does three things: resolve library names, fetch documentation pages, and search within pages. Nothing more.
+**Minimal footprint.** The server does four things: resolve library names, fetch documentation pages, browse page outlines, and search within pages. Nothing more.
 
 **Quality over features.** Fewer tools done correctly beats many tools done partially. Every code path is tested, every error is actionable, every response is predictable.
 
@@ -60,7 +60,7 @@ The following are explicitly out of scope for the open-source version:
 
 ## 4. MCP Tools
 
-ProContext exposes three MCP tools. All tools are async and return structured JSON responses.
+ProContext exposes four MCP tools. All tools are async and return structured JSON responses.
 
 ### 4.1 resolve_library
 
@@ -124,34 +124,33 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 
 ### 4.2 read_page
 
-**Purpose**: Fetch the content of any documentation URL — llms.txt indexes, README files, or documentation pages — with line-number navigation. Returns a structural outline of the full page and a windowed slice of the content controlled by `offset` and `limit`.
+**Purpose**: Fetch the content of any documentation URL — llms.txt indexes, README files, or documentation pages — with line-number navigation. Returns a compacted structural outline and a windowed slice of the content controlled by `offset` and `limit`.
 
 **Input**:
 
-| Parameter | Type    | Required | Default  | Description                                                                                     |
-| --------- | ------- | -------- | -------- | ----------------------------------------------------------------------------------------------- |
-| `url`     | string  | Yes      | —        | URL of the page to read. Typically from `resolve_library` output (`index_url`, `readme_url`) or from links found within a documentation index. |
-| `offset`  | integer | No       | 1        | 1-based line number to start reading from. Use a heading's line number to jump to that section. |
-| `limit`   | integer | No       | 500      | Maximum number of lines to return from the offset.                                              |
-| `view`    | string  | No       | `"full"` | `"full"`: returns outline and content window. `"outline"`: returns outline and total_lines only, no content. |
+| Parameter | Type    | Required | Default | Description                                                                                     |
+| --------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `url`     | string  | Yes      | —       | URL of the page to read. Typically from `resolve_library` output (`index_url`, `readme_url`) or from links found within a documentation index. |
+| `offset`  | integer | No       | 1       | 1-based line number to start reading from. Use a heading's line number to jump to that section. |
+| `limit`   | integer | No       | 500     | Maximum number of lines to return from the offset.                                              |
 
 **Processing**:
 
 1. Validate URL against SSRF allowlist; validate `offset` >= 1, `limit` >= 1
 2. Check SQLite cache for `page:{sha256(url)}` — if fresh, return from cache
 3. On cache miss: if URL does not already end with `.md`, try fetching `url + ".md"` first. On any failure (404, timeout, network error), fall back to the original URL silently. A 200 HTML response from the `.md` probe is accepted as-is — no fallback, since the original URL would return the same content on an SPA. `.md` is never appended to redirect targets; redirects are followed as the server directs. Store full content + outline in SQLite cache keyed against the original URL.
-4. Build plain-text outline from full page (always complete, regardless of offset/limit)
+4. Compact outline for response (progressive depth reduction to ≤50 entries; status message if irreducible)
 5. Slice content to the requested window (`offset`/`limit`)
-6. Return outline, windowed content, and pagination metadata
+6. Return compacted outline, windowed content, and pagination metadata
 
-**Navigation workflow**: Call `read_page` with `view="full"` to get the outline and the first 500 lines. Inspect the outline to find the section you need, then call again with `offset` set to that line number. Alternatively, call with `view="outline"` across multiple candidate pages to compare structure cheaply before committing to a full read. Use `search_page` when you know what keyword you're looking for and want to jump directly to matching content.
+**Navigation workflow**: Call `read_page` to get the compacted outline and the first 500 lines. Inspect the outline to find the section you need, then call again with `offset` set to that line number. For pages with very large outlines (status message instead of outline), use `read_outline` to browse the full outline with pagination. Use `search_page` when you know what keyword you're looking for and want to jump directly to matching content.
 
 **Output**:
 
 ```json
 {
   "url": "https://docs.langchain.com/docs/concepts/streaming.md",
-  "outline": "1: # Streaming\n3: ## Overview\n12: ## Streaming with Chat Models\n18: ### Using .stream()\n27: ### Using .astream()\n35: ## Streaming with Chains",
+  "outline": "1:# Streaming\n3:## Overview\n12:## Streaming with Chat Models\n18:### Using .stream()\n27:### Using .astream()\n35:## Streaming with Chains",
   "total_lines": 42,
   "offset": 1,
   "limit": 500,
@@ -166,7 +165,7 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 
 | Field         | Description                                                                                                                                             |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `outline`     | Plain-text structural map of the full page (always complete, regardless of offset/limit). Each line: `<line_number>: <original line>`. Includes H1–H6 headings (including blockquote headings such as `> ## Section`), headings inside fenced code blocks, and fence opener/closer lines. Fence lines give the agent context to distinguish structural headings from code block content. |
+| `outline`     | Compacted structural outline of the page (target: ≤50 entries). Progressive depth reduction removes lower-priority headings (H6 → H5 → fenced content → H4 → H3). When the page outline exceeds 50 entries even after maximum reduction, this field contains a status message directing the agent to use `read_outline` for paginated access. Each entry: `<line_number>:<original line>`. |
 | `total_lines` | Total number of lines in the full page. Useful for determining if more content exists beyond the current window.                                        |
 | `offset`      | The 1-based line number the returned content starts from.                                                                                               |
 | `limit`       | The maximum number of lines requested.                                                                                                                  |
@@ -179,15 +178,16 @@ All matching is against in-memory indexes loaded from the registry at startup. N
 
 **Notes**:
 
+- The outline is compacted to ≤50 entries to save tokens. For the complete outline, use `read_outline`.
 - The full page and outline are cached together on first fetch. Subsequent calls with different offsets are served from cache — no re-fetch or re-parse.
-- `search_page` shares the same cache — a page fetched by either tool is available to the other without a re-fetch.
+- `search_page` and `read_outline` share the same cache — a page fetched by any tool is available to the others without a re-fetch.
 - URLs must be from the allowlist. See Section 8.
 
 ---
 
 ### 4.3 search_page
 
-**Purpose**: Search within a documentation page for lines matching a query. Returns the page outline for structural context and the matching lines with their line numbers. The agent uses the outline and match locations to identify relevant sections, then calls `read_page` with `offset`/`limit` to read the full content.
+**Purpose**: Search within a documentation page for lines matching a query. Returns the matching lines with their line numbers and a compacted outline trimmed to the match range for structural context. The agent uses the outline and match locations to identify relevant sections, then calls `read_page` with `offset`/`limit` to read the full content.
 
 This tool is the equivalent of `grep` for documentation pages. It supports literal keyword search, regex patterns, smart case sensitivity, and word boundary matching.
 
@@ -209,7 +209,9 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
 2. Fetch page: check SQLite cache for `page:{sha256(url)}` — same cache as `read_page`. On cache miss, fetch and cache.
 3. Starting from `offset`, scan each line for a match against `query` (respecting `mode`, `case_mode`, `whole_word`)
 4. Collect up to `max_results` matching lines
-5. Return the page outline, matching lines, and pagination metadata
+5. Trim outline to the range between first and last match line numbers
+6. Compact trimmed outline (progressive depth reduction to ≤50 entries; status message if irreducible)
+7. Return compacted outline, matching lines, and pagination metadata
 
 **Smart case** (default): If the query string is entirely lowercase, matching is case-insensitive. If the query contains any uppercase character, matching is case-sensitive. This mirrors ripgrep's default behaviour — searching `"redis"` finds `"Redis"`, `"REDIS"`, and `"redis"`; searching `"Redis"` finds only `"Redis"`.
 
@@ -219,7 +221,7 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
 {
   "url": "https://python.langchain.com/llms.txt",
   "query": "streaming",
-  "outline": "1: # Docs by LangChain\n3: ## Concepts\n15: ## How-to Guides\n28: ## API Reference",
+  "outline": "3:## Concepts\n15:## How-to Guides",
   "matches": [
     { "line_number": 7, "content": "- [Streaming](https://docs.langchain.com/docs/concepts/streaming.md): Stream model outputs as they are generated." },
     { "line_number": 22, "content": "- [How to stream responses](https://docs.langchain.com/docs/how_to/streaming.md): Step-by-step guide to streaming." }
@@ -234,7 +236,7 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
 
 | Field         | Description                                                                                                               |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `outline`     | Plain-text structural outline of the full page (identical to `read_page` outline). Gives the agent structural context for interpreting match locations. |
+| `outline`     | Compacted structural outline trimmed to the match range (first match line to last match line). Empty string when no matches are found. When the trimmed outline exceeds 50 entries even after maximum reduction, contains a status message directing the agent to `read_outline`. |
 | `matches`     | List of matching lines. Each entry has `line_number` (1-based) and `content` (the full line text).                        |
 | `total_lines` | Total number of lines in the page.                                                                                        |
 | `has_more`    | `true` if more matches exist beyond the returned set.                                                                     |
@@ -247,7 +249,62 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
 - Matches are returned in document order (ascending line number).
 - The agent cross-references match line numbers against the outline to determine which section each match belongs to, then uses `read_page` with the appropriate `offset` to read the full section.
 - In `regex` mode, invalid patterns are rejected with `INVALID_INPUT`. Patterns are length-capped to prevent ReDoS.
-- `search_page` shares the same cache and fetch path as `read_page`. A page fetched by one tool is immediately available to the other.
+- `search_page` shares the same cache and fetch path as `read_page` and `read_outline`. A page fetched by any tool is immediately available to the others.
+
+---
+
+### 4.4 read_outline
+
+**Purpose**: Browse the full structural outline of a documentation page with pagination. Use when `read_page` or `search_page` return an outline status message indicating the page outline is too large, or when you need to explore the full page structure without fetching content.
+
+**Input**:
+
+| Parameter | Type    | Required | Default | Description                                          |
+| --------- | ------- | -------- | ------- | ---------------------------------------------------- |
+| `url`     | string  | Yes      | —       | URL of the page. Same URLs accepted by `read_page`.  |
+| `offset`  | integer | No       | 1       | 1-based outline entry index to start from.           |
+| `limit`   | integer | No       | 200     | Maximum number of outline entries to return (1–500). |
+
+**Processing**:
+
+1. Validate URL against SSRF allowlist; validate `offset` >= 1, 1 <= `limit` <= 500
+2. Check SQLite cache / fetch (same shared path as `read_page`)
+3. Parse cached outline string into structured entries
+4. Strip empty fence pairs (fence opener + closer with no headings between them)
+5. Paginate by entry index (`offset`/`limit`)
+6. Return formatted outline entries with pagination metadata
+
+**Output**:
+
+```json
+{
+  "url": "https://docs.langchain.com/docs/api_reference.md",
+  "outline": "1:# API Reference\n5:## Authentication\n12:### API Keys\n28:### OAuth\n45:## Endpoints",
+  "total_entries": 847,
+  "has_more": true,
+  "next_offset": 201,
+  "cached": true,
+  "cached_at": "2026-02-23T10:00:00Z",
+  "stale": false
+}
+```
+
+| Field           | Description                                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------------- |
+| `outline`       | Paginated outline entries in `<line_number>:<original line>` format, joined by newlines.            |
+| `total_entries`  | Total number of entries in the full outline (after stripping empty fences).                          |
+| `has_more`      | `true` if more entries exist beyond the current window.                                              |
+| `next_offset`   | Entry index to pass as `offset` to continue paginating. `null` if no more entries.                   |
+| `cached`        | Whether served from cache.                                                                           |
+| `cached_at`     | ISO 8601 timestamp (UTC) of when the page was originally fetched. `null` if not cached.              |
+| `stale`         | `true` if the cache entry is expired and a background refresh has been triggered. Defaults to `false`. |
+
+**Notes**:
+
+- Shares the same cache as `read_page` and `search_page`.
+- Empty fences (fence pairs with no headings inside) are stripped since they provide no navigational value.
+- If `offset` > `total_entries`, returns an empty outline string with correct `total_entries` — not an error.
+- The `line_number` in each entry corresponds to the line in the page content — pass it as `offset` to `read_page` to jump to that section.
 
 ---
 
@@ -444,10 +501,10 @@ Every error response follows the same structure:
 
 | Code                    | Tool                            | `recoverable` | Description                                                                           |
 | ----------------------- | ------------------------------- | ------------- | ------------------------------------------------------------------------------------- |
-| `PAGE_NOT_FOUND`        | `read_page`, `search_page`      | `false`       | HTTP 404 — the page does not exist at that URL                                        |
-| `PAGE_FETCH_FAILED`     | `read_page`, `search_page`      | `true`        | Transient network error or non-200/404 HTTP response fetching page; retry may succeed |
-| `TOO_MANY_REDIRECTS`    | `read_page`, `search_page`      | `false`       | Redirect chain exceeded the 3-hop safety limit                                        |
-| `URL_NOT_ALLOWED`       | `read_page`, `search_page`      | `false`       | URL domain not in SSRF allowlist; only a different URL will succeed                   |
+| `PAGE_NOT_FOUND`        | `read_page`, `search_page`, `read_outline` | `false`       | HTTP 404 — the page does not exist at that URL                                        |
+| `PAGE_FETCH_FAILED`     | `read_page`, `search_page`, `read_outline` | `true`        | Transient network error or non-200/404 HTTP response fetching page; retry may succeed |
+| `TOO_MANY_REDIRECTS`    | `read_page`, `search_page`, `read_outline` | `false`       | Redirect chain exceeded the 3-hop safety limit                                        |
+| `URL_NOT_ALLOWED`       | `read_page`, `search_page`, `read_outline` | `false`       | URL domain not in SSRF allowlist; only a different URL will succeed                   |
 | `INVALID_INPUT`         | Any                             | `false`       | Input validation failed; the request must be corrected before retrying                |
 
 ---
@@ -484,6 +541,13 @@ The custom registry must serve:
 - **`known-libraries.json`**: An array of library entries in the same schema as the public registry. Each entry must include a valid `llms_txt_url`.
 - **`registry_metadata.json`**: A JSON object with `version` (string), `download_url` (string), and `checksum` (`"sha256:<hex>"`) fields so the server's background update check works correctly.
 
-**Important**: The SSRF allowlist is built from domains in the loaded registry. Documentation domains in a custom registry entry are automatically permitted by `read_page` and `search_page` — no additional SSRF configuration is needed.
+**Important**: The SSRF allowlist is built from domains in the loaded registry. Documentation domains in a custom registry entry are automatically permitted by `read_page`, `search_page`, and `read_outline` — no additional SSRF configuration is needed.
 
 _Trade-off_: The custom registry completely replaces the public registry — there is no merging. Teams that want both public and private libraries must include the public entries in their custom registry. This is intentional: a merge strategy introduces ordering and conflict-resolution complexity that is not warranted for the open-source version.
+
+**D7: Outline compaction and the read_outline tool**
+Large documentation pages (16K+ lines) produce outlines with 2000+ entries. Returning the full outline on every `read_page` and `search_page` call wastes tokens and provides no usable navigation for the agent. Compaction progressively removes lower-priority entries (H6 → H5 → fenced content → H4 → H3) until the outline fits within 50 entries. When even H1/H2 exceed 50, a status message directs the agent to `read_outline` for paginated access. `search_page` additionally trims the outline to the match range before compaction, so the agent only sees structural context around its search results.
+
+`read_outline` is a separate tool (not a `view` parameter on `read_page`) because outline pagination uses entry indices while content pagination uses line numbers — overloading the same `offset`/`limit` parameters with different semantics depending on mode would be confusing and error-prone.
+
+_Trade-off_: The compacted outline may omit the exact heading an agent needs, requiring a follow-up `read_outline` call. Accepted — this is strictly better than the alternative (returning 2000 entries of outline on every call) both for token efficiency and navigation usability.

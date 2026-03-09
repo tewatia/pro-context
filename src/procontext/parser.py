@@ -29,7 +29,7 @@ def parse_outline(content: str) -> str:
     """Extract a plain-text structural map from Markdown content.
 
     Returns one line per heading or fence marker in the format
-    ``"<lineno>: <original line>"``, joined by newlines.
+    ``"<lineno>:<original line>"``, joined by newlines.
     Returns an empty string if no headings or fences are found.
 
     Fence opener and closer lines are included so the agent can determine
@@ -45,6 +45,6 @@ def parse_outline(content: str) -> str:
     for lineno, line in enumerate(content.splitlines(), start=1):
         stripped = line.strip()
         if _FENCE_RE.match(line) or _HEADING_RE.match(stripped):
-            lines.append(f"{lineno}: {line}")
+            lines.append(f"{lineno}:{line}")
 
     return "\n".join(lines)
