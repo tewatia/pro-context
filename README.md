@@ -78,7 +78,7 @@ Add to your MCP client config:
 
 ## How It Works
 
-ProContext exposes three MCP tools. The agent drives the navigation — no server-side search, no intent guessing.
+ProContext exposes four MCP tools. The agent drives the navigation — no server-side search, no intent guessing.
 
 **Step 1 — Resolve the library**
 
@@ -112,10 +112,7 @@ read_page({ "url": "https://python.langchain.com/llms.txt" })
 search_page({ "url": "https://python.langchain.com/llms.txt", "query": "streaming" })
 
 → {
-    "matches": [
-      { "line_number": 7, "content": "- [Streaming](https://...): Stream model outputs..." },
-      { "line_number": 22, "content": "- [How to stream responses](https://...): ..." }
-    ],
+    "matches": "7:- [Streaming](https://...): Stream model outputs...\n22:- [How to stream responses](https://...): ...",
     "has_more": false
   }
 ```

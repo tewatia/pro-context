@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from procontext.errors import ErrorCode, ProContextError
-from procontext.models.tools import LineMatchOutput, SearchPageInput, SearchPageOutput
+from procontext.models.tools import SearchPageInput, SearchPageOutput
 from procontext.outline import (
     build_compaction_note,
     compact_outline,
@@ -91,17 +91,20 @@ async def handle(
 
     total_lines = len(result.content.splitlines())
 
+    # Format matches as "line_number:content" string
+    raw_matches = search_result.matches
+    matches_str = "\n".join(f"{m.line_number}:{m.content}" for m in raw_matches)
+
     # Build compacted outline trimmed to match range
-    matches = [
-        LineMatchOutput(line_number=m.line_number, content=m.content) for m in search_result.matches
-    ]
-    outline = _compact_search_outline(result.outline, matches)
+    first_line = raw_matches[0].line_number if raw_matches else None
+    last_line = raw_matches[-1].line_number if raw_matches else None
+    outline = _compact_search_outline(result.outline, first_line, last_line)
 
     output = SearchPageOutput(
         url=result.url,
         query=validated.query,
         outline=outline,
-        matches=matches,
+        matches=matches_str,
         total_lines=total_lines,
         has_more=search_result.has_more,
         next_offset=search_result.next_offset,
@@ -111,9 +114,9 @@ async def handle(
     return output.model_dump(mode="json")
 
 
-def _compact_search_outline(raw_outline: str, matches: list[LineMatchOutput]) -> str:
+def _compact_search_outline(raw_outline: str, first_line: int | None, last_line: int | None) -> str:
     """Trim outline to match range and compact for search_page output."""
-    if not matches:
+    if first_line is None or last_line is None:
         return ""
 
     entries = parse_outline_entries(raw_outline)
@@ -121,8 +124,6 @@ def _compact_search_outline(raw_outline: str, matches: list[LineMatchOutput]) ->
     total_entries = len(entries)
 
     # Trim to match range
-    first_line = matches[0].line_number
-    last_line = matches[-1].line_number
     trimmed = trim_outline_to_range(entries, first_line, last_line)
 
     if len(trimmed) <= 50:

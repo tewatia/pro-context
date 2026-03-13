@@ -180,11 +180,6 @@ class SearchPageInput(BaseModel):
         return v
 
 
-class LineMatchOutput(BaseModel):
-    line_number: int = Field(description="1-based line number of the matching line.")
-    content: str = Field(description="The full text of the matching line.")
-
-
 class SearchPageOutput(BaseModel):
     url: str = Field(description="The URL that was searched.")
     query: str = Field(description="The search query as provided.")
@@ -193,8 +188,11 @@ class SearchPageOutput(BaseModel):
             "Compacted outline trimmed to match range. Empty string when no matches found."
         )
     )
-    matches: list[LineMatchOutput] = Field(
-        description="Lines matching the query, in document order."
+    matches: str = Field(
+        description=(
+            "Matching lines formatted as '<line_number>:<content>', one per line. "
+            "Empty string when no matches found."
+        )
     )
     total_lines: int = Field(description="Total number of lines in the page.")
     has_more: bool = Field(description="True if more matches exist beyond the returned set.")

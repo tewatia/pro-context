@@ -327,15 +327,11 @@ class SearchPageInput(BaseModel):
             raise ValueError("max_results must be >= 1")
         return v
 
-class LineMatch(BaseModel):
-    line_number: int          # 1-based line number
-    content: str              # Full text of the matching line
-
 class SearchPageOutput(BaseModel):
     url: str
     query: str
     outline: str              # Compacted outline trimmed to match range; empty string if no matches
-    matches: list[LineMatch]
+    matches: str              # Matching lines as "line_number:content", one per line; empty if none
     total_lines: int
     has_more: bool
     next_offset: int | None   # Line number for next search call; None if no more matches

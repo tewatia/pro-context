@@ -15,6 +15,7 @@
   - [4.1 resolve_library](#41-resolve_library)
   - [4.2 read_page](#42-read_page)
   - [4.3 search_page](#43-search_page)
+  - [4.4 read_outline](#44-read_outline)
 - [5. Transport Modes](#5-transport-modes)
   - [5.1 stdio Transport](#51-stdio-transport)
   - [5.2 HTTP Transport](#52-http-transport)
@@ -222,10 +223,7 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
   "url": "https://python.langchain.com/llms.txt",
   "query": "streaming",
   "outline": "3:## Concepts\n15:## How-to Guides",
-  "matches": [
-    { "line_number": 7, "content": "- [Streaming](https://docs.langchain.com/docs/concepts/streaming.md): Stream model outputs as they are generated." },
-    { "line_number": 22, "content": "- [How to stream responses](https://docs.langchain.com/docs/how_to/streaming.md): Step-by-step guide to streaming." }
-  ],
+  "matches": "7:- [Streaming](https://docs.langchain.com/docs/concepts/streaming.md): Stream model outputs as they are generated.\n22:- [How to stream responses](https://docs.langchain.com/docs/how_to/streaming.md): Step-by-step guide to streaming.",
   "total_lines": 45,
   "has_more": false,
   "next_offset": null,
@@ -237,7 +235,7 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
 | Field         | Description                                                                                                               |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `outline`     | Compacted structural outline trimmed to the match range (first match line to last match line). Empty string when no matches are found. When the trimmed outline exceeds 50 entries even after maximum reduction, contains a status message directing the agent to `read_outline`. |
-| `matches`     | List of matching lines. Each entry has `line_number` (1-based) and `content` (the full line text).                        |
+| `matches`     | Matching lines formatted as `<line_number>:<content>`, one per line. Empty string when no matches found.                  |
 | `total_lines` | Total number of lines in the page.                                                                                        |
 | `has_more`    | `true` if more matches exist beyond the returned set.                                                                     |
 | `next_offset` | Line number to pass as `offset` for the next search call to continue paginating. `null` if no more matches.               |

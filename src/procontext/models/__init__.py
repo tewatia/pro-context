@@ -8,7 +8,6 @@ from procontext.models.registry import (
     RegistryPackages,
 )
 from procontext.models.tools import (
-    LineMatchOutput,
     ReadOutlineInput,
     ReadOutlineOutput,
     ReadPageInput,
@@ -36,5 +35,4 @@ __all__ = [
     "ReadOutlineOutput",
     "SearchPageInput",
     "SearchPageOutput",
-    "LineMatchOutput",
 ]

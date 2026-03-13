@@ -236,7 +236,7 @@ async def search_page(
       url          — the URL that was searched
       query        — the search query as provided
       outline      — compacted outline trimmed to match range; empty on zero matches
-      matches      — list of {line_number, content} for matching lines
+      matches      — matching lines as 'line_number:content', one per line
       total_lines  — total line count of the page
       has_more     — true if more matches exist beyond the returned set
       next_offset  — line number to pass as offset to continue paginating

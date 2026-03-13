@@ -29,17 +29,22 @@
   - [4.2 Output Schema](#42-output-schema)
   - [4.3 Examples](#43-examples)
   - [4.4 Error Cases](#44-error-cases)
-- [5. Resource: session/libraries](#5-resource-sessionlibraries)
-  - [5.1 URI](#51-uri)
-  - [5.2 Schema](#52-schema)
-  - [5.3 Example](#53-example)
-- [6. Error Reference](#6-error-reference)
-  - [6.1 Error Envelope](#61-error-envelope)
-  - [6.2 Error Code Catalogue](#62-error-code-catalogue)
-- [7. Transport Reference](#7-transport-reference)
-  - [7.1 stdio Transport](#71-stdio-transport)
-  - [7.2 HTTP Transport](#72-http-transport)
-- [8. Versioning Policy](#8-versioning-policy)
+- [5. Tool: read_outline](#5-tool-read_outline)
+  - [5.1 Input Schema](#51-input-schema)
+  - [5.2 Output Schema](#52-output-schema)
+  - [5.3 Examples](#53-examples)
+  - [5.4 Error Cases](#54-error-cases)
+- [6. Resource: session/libraries](#6-resource-sessionlibraries)
+  - [6.1 URI](#61-uri)
+  - [6.2 Schema](#62-schema)
+  - [6.3 Example](#63-example)
+- [7. Error Reference](#7-error-reference)
+  - [7.1 Error Envelope](#71-error-envelope)
+  - [7.2 Error Code Catalogue](#72-error-code-catalogue)
+- [8. Transport Reference](#8-transport-reference)
+  - [8.1 stdio Transport](#81-stdio-transport)
+  - [8.2 HTTP Transport](#82-http-transport)
+- [9. Versioning Policy](#9-versioning-policy)
 
 ---
 
@@ -391,7 +396,7 @@ An empty `matches` list is a valid, non-error outcome. The library is simply not
 
 ## 3. Tool: read_page
 
-**Purpose**: Fetch any documentation URL — llms.txt indexes, README files, or documentation pages. Returns a structural outline of the full page (H1–H6 headings and fence markers) with 1-based line numbers, and optionally a windowed slice of content. The `view` parameter controls what is returned. If the URL does not end with `.md`, the server tries the `.md` variant first; on any failure (404, timeout, network error) it falls back to the original URL. A 200 HTML response from the `.md` probe is accepted as-is. `.md` is never appended to redirect targets.
+**Purpose**: Fetch any documentation URL — llms.txt indexes, README files, or documentation pages. Returns a compacted structural outline (≤50 entries) and a windowed slice of content. If the URL does not end with `.md`, the server tries the `.md` variant first; on any failure (404, timeout, network error) it falls back to the original URL. A 200 HTML response from the `.md` probe is accepted as-is. `.md` is never appended to redirect targets.
 
 ### 3.1 Input Schema
 
@@ -646,22 +651,8 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
       "description": "Compacted structural outline trimmed to the match range (first match line to last match line). Empty string when no matches found. When the trimmed outline exceeds 50 entries even after maximum compaction, contains a status message directing to read_outline."
     },
     "matches": {
-      "type": "array",
-      "description": "Lines matching the query, in document order.",
-      "items": {
-        "type": "object",
-        "properties": {
-          "line_number": {
-            "type": "integer",
-            "description": "1-based line number of the matching line."
-          },
-          "content": {
-            "type": "string",
-            "description": "The full text of the matching line."
-          }
-        },
-        "required": ["line_number", "content"]
-      }
+      "type": "string",
+      "description": "Matching lines formatted as '<line_number>:<content>', one per line. Empty string when no matches found."
     },
     "total_lines": {
       "type": "integer",
@@ -699,10 +690,7 @@ Result:
   "url": "https://python.langchain.com/llms.txt",
   "query": "streaming",
   "outline": "3:## Concepts\n15:## How-to Guides",
-  "matches": [
-    { "line_number": 7, "content": "- [Streaming](https://docs.langchain.com/docs/concepts/streaming.md): Stream model outputs as they are generated." },
-    { "line_number": 22, "content": "- [How to stream responses](https://docs.langchain.com/docs/how_to/streaming.md): Step-by-step guide to streaming." }
-  ],
+  "matches": "7:- [Streaming](https://docs.langchain.com/docs/concepts/streaming.md): Stream model outputs as they are generated.\n22:- [How to stream responses](https://docs.langchain.com/docs/how_to/streaming.md): Step-by-step guide to streaming.",
   "total_lines": 45,
   "has_more": false,
   "next_offset": null,
@@ -726,11 +714,7 @@ Result:
   "url": "https://docs.pydantic.dev/concepts/models.md",
   "query": "model",
   "outline": "1:# Models\n5:## Defining a Model",
-  "matches": [
-    { "line_number": 1, "content": "# Models" },
-    { "line_number": 5, "content": "## Defining a Model" },
-    { "line_number": 7, "content": "A Pydantic model is a class that inherits from BaseModel." }
-  ],
+  "matches": "1:# Models\n5:## Defining a Model\n7:A Pydantic model is a class that inherits from BaseModel.",
   "total_lines": 65,
   "has_more": true,
   "next_offset": 8,
@@ -891,13 +875,13 @@ Result contains entries 201–400 with `has_more: true` and `next_offset: 401`.
 
 > **Status**: Planned — not yet implemented. The server currently registers no MCP resources. This section documents the intended design for a future release.
 
-### 5.1 URI
+### 6.1 URI
 
 ```
 procontext://session/libraries
 ```
 
-### 5.2 Schema
+### 6.2 Schema
 
 Read via `resources/read`:
 
@@ -953,7 +937,7 @@ The `text` field (parsed):
 }
 ```
 
-### 5.3 Example
+### 6.3 Example
 
 ```json
 {

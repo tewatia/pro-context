@@ -510,8 +510,11 @@ class TestSearchPageHandler:
         assert result["url"] == _SAMPLE_URL
         assert result["query"] == "streaming"
         assert result["cached"] is False
-        assert len(result["matches"]) > 0
-        assert all("line_number" in m and "content" in m for m in result["matches"])
+        assert result["matches"] != ""
+        # Each line should be in "line_number:content" format
+        for line in result["matches"].split("\n"):
+            colon_idx = line.index(":")
+            int(line[:colon_idx])  # line_number must be an int
 
     @respx.mock
     async def test_search_cache_hit_shared_with_read_page(self, app_state: AppState) -> None:
@@ -540,7 +543,7 @@ class TestSearchPageHandler:
         respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
 
         result = await search_page_handle(_SAMPLE_URL, "xyzzy_nonexistent", app_state)
-        assert result["matches"] == []
+        assert result["matches"] == ""
         assert result["outline"] == ""
         assert result["has_more"] is False
         assert result["next_offset"] is None
@@ -550,7 +553,8 @@ class TestSearchPageHandler:
         respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
 
         result = await search_page_handle(_SAMPLE_URL, "stream", app_state, max_results=1)
-        assert len(result["matches"]) == 1
+        match_lines = result["matches"].split("\n")
+        assert len(match_lines) == 1
         # "stream" appears in many lines, so there should be more
         assert result["has_more"] is True
         assert result["next_offset"] is not None
@@ -563,10 +567,11 @@ class TestSearchPageHandler:
             max_results=100,
             offset=result["next_offset"],
         )
-        assert len(result2["matches"]) > 0
+        match_lines2 = result2["matches"].split("\n")
+        assert len(match_lines2) > 0
         # No overlap
-        first_lines = {m["line_number"] for m in result["matches"]}
-        second_lines = {m["line_number"] for m in result2["matches"]}
+        first_lines = {line.split(":")[0] for line in match_lines}
+        second_lines = {line.split(":")[0] for line in match_lines2}
         assert first_lines.isdisjoint(second_lines)
 
     @respx.mock
@@ -599,7 +604,7 @@ class TestSearchPageHandler:
 
         # Search for ".astream()" — appears only in lines 13-15 area
         result = await search_page_handle(_SAMPLE_URL, ".astream()", app_state)
-        assert len(result["matches"]) > 0
+        assert result["matches"] != ""
         outline = result["outline"]
         # Outline should not contain headings far from the matches
         # "# Streaming" at line 1 should NOT be in the trimmed outline
