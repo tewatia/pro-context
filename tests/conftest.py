@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
+import structlog
 
 from procontext.models.registry import RegistryEntry, RegistryIndexes, RegistryPackages
 from procontext.registry import build_indexes
+
+# Configure structlog to write to stderr, matching production behavior.
+# Without this, structlog defaults to stdout which would corrupt the MCP
+# JSON-RPC stream in stdio mode.
+structlog.configure(
+    logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+)
 
 
 @pytest.fixture()

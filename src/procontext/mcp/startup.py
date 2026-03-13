@@ -49,12 +49,18 @@ async def _ensure_registry(settings: Settings) -> bool:
 async def _run_setup(settings: Settings) -> None:
     """Fetch the registry from the configured URL and save it to the data directory."""
     registry_path, _ = registry_paths(settings)
-    print(f"Downloading registry from {settings.registry.metadata_url} ...", flush=True)
+    print(  # noqa: T201 — CLI command, not MCP server
+        f"Downloading registry from {settings.registry.metadata_url} ...",
+        flush=True,
+    )
 
     if await _attempt_registry_setup(settings):
-        print(f"Registry initialised (saved to: {registry_path})", flush=True)
+        print(  # noqa: T201 — CLI command, not MCP server
+            f"Registry initialised (saved to: {registry_path})",
+            flush=True,
+        )
     else:
-        print(
+        print(  # noqa: T201 — CLI command, not MCP server
             "Setup failed. Check your network and try again.\n"
             "If the error persists, you can manually download the registry\n"
             "and configure its path in procontext.yaml",
@@ -67,7 +73,7 @@ def main() -> None:
     try:
         settings = Settings()
     except ValidationError as exc:
-        print(f"Configuration error:\n{exc}", file=sys.stderr)
+        print(f"Configuration error:\n{exc}", file=sys.stderr)  # noqa: T201
         sys.exit(1)
 
     setup_logging(settings)

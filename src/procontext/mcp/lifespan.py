@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,6 +30,33 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 log = structlog.get_logger()
+
+
+class _StdoutGuard:
+    """Drop-in replacement for ``sys.stdout`` that blocks writes.
+
+    In stdio mode, stdout is owned by the MCP JSON-RPC stream.  Any write
+    from application code (``print()``, ``sys.stdout.write()``, stray
+    ``logging.StreamHandler``) would corrupt the protocol.  This guard is
+    installed after MCP has captured ``sys.stdout.buffer`` for its own use,
+    so the protocol transport is unaffected.
+
+    The ``buffer`` property delegates to the real binary stream so that
+    low-level code that bypasses ``sys.stdout.write()`` still works.
+    """
+
+    def write(self, data: str) -> int:
+        raise RuntimeError(
+            "Attempted write to stdout, which is reserved for the MCP JSON-RPC "
+            "stream in stdio mode. Use structlog (writes to stderr) instead."
+        )
+
+    def flush(self) -> None:
+        pass
+
+    @property
+    def buffer(self) -> object:
+        return sys.__stdout__.buffer if sys.__stdout__ else None
 
 
 def registry_paths(settings: Settings) -> tuple[Path, Path]:
@@ -98,6 +126,13 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
         allowlist=allowlist,
     )
 
+    # In stdio mode, install the stdout guard to prevent accidental writes
+    # that would corrupt the MCP JSON-RPC stream. This runs *after* the MCP
+    # transport has already captured sys.stdout.buffer for its own use.
+    original_stdout = sys.stdout
+    if settings.server.transport == "stdio":
+        sys.stdout = _StdoutGuard()  # type: ignore[assignment]
+
     if settings.server.transport == "http":
         registry_update_task = asyncio.create_task(run_registry_update_scheduler(state))
         cache_cleanup_task = asyncio.create_task(run_cache_cleanup_scheduler(state))
@@ -116,6 +151,7 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[AppState, None]:
     try:
         yield state
     finally:
+        sys.stdout = original_stdout
         registry_update_task.cancel()
         cache_cleanup_task.cancel()
         with suppress(asyncio.CancelledError):

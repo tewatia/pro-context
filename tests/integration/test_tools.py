@@ -6,6 +6,8 @@ Tests the full path through each handler: input validation → business logic
 
 from __future__ import annotations
 
+import io
+import sys
 from typing import TYPE_CHECKING
 
 import httpx
@@ -767,3 +769,98 @@ class TestReadPageCompaction:
         outline = result["outline"]
         assert "[Outline too large" in outline
         assert "read_outline" in outline
+
+
+class TestStdoutGuard:
+    """Verify that tool handlers never write to stdout.
+
+    In stdio mode, stdout is owned by the MCP JSON-RPC stream. Any write
+    from tool code (print, logging misconfiguration, third-party library)
+    would corrupt the protocol. These tests call every tool handler with
+    stdout redirected to a buffer and assert it remains empty.
+    """
+
+    @respx.mock
+    async def test_resolve_library_no_stdout(self, app_state: AppState) -> None:
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            await handle("langchain", app_state)
+            await handle("xyzzy_nonexistent", app_state)
+        finally:
+            sys.stdout = old
+        assert buf.getvalue() == "", f"stdout polluted by resolve_library: {buf.getvalue()!r}"
+
+    @respx.mock
+    async def test_read_page_no_stdout(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            # Cache miss path
+            await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+            # Cache hit path
+            await read_page_handle(_SAMPLE_URL, 1, 100, app_state)
+        finally:
+            sys.stdout = old
+        assert buf.getvalue() == "", f"stdout polluted by read_page: {buf.getvalue()!r}"
+
+    @respx.mock
+    async def test_search_page_no_stdout(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            await search_page_handle(_SAMPLE_URL, "streaming", app_state)
+            await search_page_handle(_SAMPLE_URL, "xyzzy_nonexistent", app_state)
+        finally:
+            sys.stdout = old
+        assert buf.getvalue() == "", f"stdout polluted by search_page: {buf.getvalue()!r}"
+
+    @respx.mock
+    async def test_read_outline_no_stdout(self, app_state: AppState) -> None:
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            await read_outline_handle(_SAMPLE_URL, 1, 200, app_state)
+        finally:
+            sys.stdout = old
+        assert buf.getvalue() == "", f"stdout polluted by read_outline: {buf.getvalue()!r}"
+
+    @respx.mock
+    async def test_error_paths_no_stdout(self, app_state: AppState) -> None:
+        """Error handling paths should also not leak to stdout."""
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            # SSRF error
+            with pytest.raises(ProContextError):
+                await read_page_handle("https://evil.example.com/x.md", 1, 500, app_state)
+            # Invalid regex
+            with pytest.raises(ProContextError):
+                await search_page_handle(_SAMPLE_URL, "[invalid", app_state, mode="regex")
+        finally:
+            sys.stdout = old
+        assert buf.getvalue() == "", f"stdout polluted by error paths: {buf.getvalue()!r}"
+
+    def test_stdout_guard_blocks_write(self) -> None:
+        """The runtime guard raises on any write attempt."""
+        from procontext.mcp.lifespan import _StdoutGuard
+
+        guard = _StdoutGuard()
+        with pytest.raises(RuntimeError, match="reserved for the MCP JSON-RPC"):
+            guard.write("oops")
+
+    def test_stdout_guard_flush_is_noop(self) -> None:
+        """flush() must not raise — callers may call it defensively."""
+        from procontext.mcp.lifespan import _StdoutGuard
+
+        guard = _StdoutGuard()
+        guard.flush()  # should not raise
