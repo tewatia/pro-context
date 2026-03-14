@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.scripts]
-procontext = "procontext.mcp.startup:main"
+procontext = "procontext.cli.main:main"
 
 [dependency-groups]
 dev = [
@@ -50,13 +50,17 @@ testpaths = ["tests"]
 [tool.coverage.run]
 branch = true
 # Omit files that are untestable by design:
-# - server.py: FastMCP instance + tool registrations, requires a live MCP runtime
-# - lifespan.py: asynccontextmanager wiring, requires a live MCP runtime
-# - startup.py: process entrypoint, requires a live process
+# - mcp/*: FastMCP instance, lifespan wiring, tool registrations — require a live MCP runtime
+# - cli/main.py: argparse dispatcher, tested via subprocess
+# - cli/cmd_setup.py: thin wrapper over registry functions, tested via subprocess
+# - cli/cmd_serve.py: registry bootstrap + server launch, tested via subprocess
 # - logging_config.py: structlog configuration, side-effectful at import
 # - protocols.py: pure Protocol definitions with no runtime code
 omit = [
     "src/procontext/mcp/*",
+    "src/procontext/cli/main.py",
+    "src/procontext/cli/cmd_setup.py",
+    "src/procontext/cli/cmd_serve.py",
     "src/procontext/logging_config.py",
     "src/procontext/protocols.py",
 ]

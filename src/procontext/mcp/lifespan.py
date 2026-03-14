@@ -13,7 +13,7 @@ import structlog
 
 from procontext import __version__
 from procontext.cache import Cache
-from procontext.config import Settings
+from procontext.config import Settings, registry_paths
 from procontext.fetcher import Fetcher, build_allowlist, build_http_client
 from procontext.registry import build_indexes, load_registry
 from procontext.schedulers import (
@@ -57,15 +57,6 @@ class _StdoutGuard:
     @property
     def buffer(self) -> object:
         return sys.__stdout__.buffer if sys.__stdout__ else None
-
-
-def registry_paths(settings: Settings) -> tuple[Path, Path]:
-    """Return local registry pair paths for the current runtime."""
-    registry_dir = Path(settings.data_dir) / "registry"
-    return (
-        registry_dir / "known-libraries.json",
-        registry_dir / "registry-state.json",
-    )
 
 
 @asynccontextmanager

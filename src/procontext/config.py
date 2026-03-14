@@ -116,3 +116,12 @@ class Settings(BaseSettings):
             YamlConfigSettingsSource(settings_cls),  # YAML file
             # dotenv and file secrets intentionally excluded
         )
+
+
+def registry_paths(settings: Settings) -> tuple[Path, Path]:
+    """Return (registry_json_path, state_json_path) for the current runtime."""
+    registry_dir = Path(settings.data_dir) / "registry"
+    return (
+        registry_dir / "known-libraries.json",
+        registry_dir / "registry-state.json",
+    )
