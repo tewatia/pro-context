@@ -219,6 +219,8 @@ A useful heuristic: if you cannot understand what a file does without scrolling 
 
 Prefer flat files for single-concern modules — a subdirectory only earns its place when two or more closely related files belong together and would be confusing in isolation.
 
+Prefer files under `300` lines when possible; treat `500` lines as an exception ceiling that should require a strong cohesion argument.
+
 ### 25. Minimize runtime dependencies
 
 Zero dependencies is ideal. When that is not practical, justify every runtime dependency. Each one has an ongoing cost:
