@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from procontext.cli.doctor.models import CheckResult
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from procontext.cli.doctor.models import CheckResult
 
 _LABEL_WIDTH = 22
 

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiosqlite
 
 from procontext.cache import Cache
-from procontext.config import Settings
+
+if TYPE_CHECKING:
+    from procontext.config import Settings
 
 
 def _delete_cache_files(db_path: Path) -> None:

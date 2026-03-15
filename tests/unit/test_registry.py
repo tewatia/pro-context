@@ -11,14 +11,13 @@ import httpx
 from procontext.config import Settings
 from procontext.fetcher import build_allowlist
 from procontext.registry import (
-    _fsync_directory,
-    _write_last_checked_at,
     check_for_registry_update,
     fetch_registry_for_setup,
     load_registry,
     registry_check_is_due,
     save_registry_to_disk,
 )
+from procontext.registry.storage import _fsync_directory, write_last_checked_at
 from procontext.state import AppState
 
 if TYPE_CHECKING:
@@ -557,7 +556,7 @@ def test_load_registry_returns_none_on_corrupt_json(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _write_last_checked_at
+# write_last_checked_at
 # ---------------------------------------------------------------------------
 
 
@@ -574,7 +573,7 @@ class TestWriteLastCheckedAt:
         state_path.write_text(json.dumps(original), encoding="utf-8")
 
         before = datetime.now(UTC)
-        _write_last_checked_at(state_path)
+        write_last_checked_at(state_path)
         after = datetime.now(UTC)
 
         state_data = json.loads(state_path.read_text(encoding="utf-8"))
@@ -586,7 +585,7 @@ class TestWriteLastCheckedAt:
 
     def test_nonexistent_file_does_not_raise(self, tmp_path: Path) -> None:
         """A missing state file is silently ignored (non-fatal)."""
-        _write_last_checked_at(tmp_path / "nonexistent.json")
+        write_last_checked_at(tmp_path / "nonexistent.json")
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +611,7 @@ async def test_check_for_registry_update_up_to_date_writes_last_checked_at(
             },
         )
 
-    # Write a state file for _write_last_checked_at to update
+    # Write a state file for write_last_checked_at to update
     registry_dir = tmp_path / "registry"
     registry_dir.mkdir(parents=True, exist_ok=True)
     old_checked = "2026-01-01T00:00:00Z"

@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import httpx
 
+from procontext.cli import cmd_setup
 from procontext.cli.doctor.models import CheckResult
 from procontext.config import registry_paths
 
 if TYPE_CHECKING:
-    from procontext.config import Settings
+    from collections.abc import Callable, Sequence
+
+    from procontext.config import FetcherSettings, Settings
+    from procontext.models.registry import RegistryEntry
 
 
 async def check_data_dir(settings: Settings, *, fix: bool = False) -> CheckResult:
@@ -81,7 +85,7 @@ async def check_registry(
     settings: Settings,
     *,
     fix: bool = False,
-    load_registry_fn: Callable[..., tuple[list[object], str] | None],
+    load_registry_fn: Callable[..., tuple[Sequence[RegistryEntry], str] | None],
 ) -> CheckResult:
     """Validate registry files are present, parseable, and checksum-valid."""
     registry_path, registry_state_path = registry_paths(settings)
@@ -100,11 +104,9 @@ async def check_registry(
         )
 
     if fix:
-        from procontext.cli.cmd_setup import attempt_registry_setup
-
         try:
-            success = await attempt_registry_setup(settings)
-        except Exception as exc:
+            success = await cmd_setup.attempt_registry_setup(settings)
+        except (OSError, httpx.HTTPError) as exc:
             return CheckResult(
                 "Registry",
                 "fail",
@@ -148,7 +150,7 @@ async def check_network(
     settings: Settings,
     *,
     fix: bool = False,
-    client_builder: Callable[[object], httpx.AsyncClient],
+    client_builder: Callable[[FetcherSettings | None], httpx.AsyncClient],
 ) -> CheckResult:
     """Check network connectivity to the registry metadata URL."""
     del fix

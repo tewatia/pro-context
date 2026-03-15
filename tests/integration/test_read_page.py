@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+import anyio
 import httpx
 import pytest
 import respx
 
 from procontext.errors import ErrorCode, ProContextError
+from procontext.tools import _shared as shared_tools
 from procontext.tools.read_page import handle as read_page_handle
 from tests.integration.tool_test_support import (
     SAMPLE_PAGE,
@@ -22,6 +23,40 @@ from tests.integration.tool_test_support import (
 
 if TYPE_CHECKING:
     from procontext.state import AppState
+
+
+def _track_background_refresh(monkeypatch: pytest.MonkeyPatch) -> anyio.Event:
+    """Signal when the read_page background refresh task completes."""
+    completed = anyio.Event()
+    original_background_refresh = shared_tools._background_refresh
+
+    async def wrapped_background_refresh(*, url: str, url_hash: str, state: AppState) -> None:
+        try:
+            await original_background_refresh(url=url, url_hash=url_hash, state=state)
+        finally:
+            completed.set()
+
+    monkeypatch.setattr(shared_tools, "_background_refresh", wrapped_background_refresh)
+    return completed
+
+
+def _block_background_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[anyio.Event, anyio.Event]:
+    """Hold the background refresh open until the test explicitly releases it."""
+    release = anyio.Event()
+    completed = anyio.Event()
+    original_background_refresh = shared_tools._background_refresh
+
+    async def wrapped_background_refresh(*, url: str, url_hash: str, state: AppState) -> None:
+        try:
+            await release.wait()
+            await original_background_refresh(url=url, url_hash=url_hash, state=state)
+        finally:
+            completed.set()
+
+    monkeypatch.setattr(shared_tools, "_background_refresh", wrapped_background_refresh)
+    return release, completed
 
 
 class TestReadPageHandler:
@@ -55,9 +90,14 @@ class TestReadPageHandler:
         assert respx.calls.call_count == 1
 
     @respx.mock
-    async def test_stale_cache_serves_stale_immediately(self, app_state: AppState) -> None:
+    async def test_stale_cache_serves_stale_immediately(
+        self,
+        app_state: AppState,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Expired cache returns stale content immediately and spawns background refresh."""
         respx.get(SAMPLE_URL).mock(return_value=httpx.Response(200, text=SAMPLE_PAGE))
+        refresh_completed = _track_background_refresh(monkeypatch)
 
         await read_page_handle(SAMPLE_URL, 1, 500, app_state)
         await expire_cached_page(app_state)
@@ -67,13 +107,19 @@ class TestReadPageHandler:
         assert result["stale"] is True
         assert "# Streaming" in result["content"]
 
-        await asyncio.sleep(0.1)
+        with anyio.fail_after(5):
+            await refresh_completed.wait()
 
     @respx.mock
-    async def test_stale_background_refresh_updates_cache(self, app_state: AppState) -> None:
+    async def test_stale_background_refresh_updates_cache(
+        self,
+        app_state: AppState,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Background refresh updates the cache so the next call gets fresh content."""
         updated_page = "# Updated\n\nNew content."
         respx.get(SAMPLE_URL).mock(return_value=httpx.Response(200, text=SAMPLE_PAGE))
+        refresh_completed = _track_background_refresh(monkeypatch)
 
         await read_page_handle(SAMPLE_URL, 1, 500, app_state)
         await expire_cached_page(app_state)
@@ -83,7 +129,8 @@ class TestReadPageHandler:
         result = await read_page_handle(SAMPLE_URL, 1, 500, app_state)
         assert result["stale"] is True
 
-        await asyncio.sleep(0.1)
+        with anyio.fail_after(5):
+            await refresh_completed.wait()
 
         result2 = await read_page_handle(SAMPLE_URL, 1, 500, app_state)
         assert result2["cached"] is True
@@ -114,9 +161,14 @@ class TestReadPageHandler:
         assert result1["content_hash"] != result2["content_hash"]
 
     @respx.mock
-    async def test_stale_no_duplicate_background_tasks(self, app_state: AppState) -> None:
+    async def test_stale_no_duplicate_background_tasks(
+        self,
+        app_state: AppState,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Multiple calls to a stale URL don't spawn duplicate background tasks."""
         respx.get(SAMPLE_URL).mock(return_value=httpx.Response(200, text=SAMPLE_PAGE))
+        release_refresh, refresh_completed = _block_background_refresh(monkeypatch)
 
         await read_page_handle(SAMPLE_URL, 1, 500, app_state)
         await expire_cached_page(app_state)
@@ -126,7 +178,9 @@ class TestReadPageHandler:
         assert url_hash in app_state._refreshing
 
         await read_page_handle(SAMPLE_URL, 1, 500, app_state)
-        await asyncio.sleep(0.1)
+        release_refresh.set()
+        with anyio.fail_after(5):
+            await refresh_completed.wait()
         assert url_hash not in app_state._refreshing
 
     @respx.mock
@@ -226,7 +280,9 @@ class TestReadPageHandler:
         redirect2 = "https://python.langchain.com/docs/concepts/r2.md"
         redirect3 = "https://python.langchain.com/docs/concepts/r3.md"
         redirect4 = "https://python.langchain.com/docs/concepts/r4.md"
-        respx.get(SAMPLE_URL).mock(return_value=httpx.Response(301, headers={"location": redirect1}))
+        respx.get(SAMPLE_URL).mock(
+            return_value=httpx.Response(301, headers={"location": redirect1})
+        )
         respx.get(redirect1).mock(return_value=httpx.Response(301, headers={"location": redirect2}))
         respx.get(redirect2).mock(return_value=httpx.Response(301, headers={"location": redirect3}))
         respx.get(redirect3).mock(return_value=httpx.Response(301, headers={"location": redirect4}))

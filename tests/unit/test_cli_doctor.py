@@ -11,15 +11,15 @@ import pytest
 
 from procontext.cache import Cache
 from procontext.cli.cmd_doctor import (
-    CheckResult,
-    _expected_schema,
-    _format_result,
     check_cache,
     check_data_dir,
     check_network,
     check_registry,
     run_doctor,
 )
+from procontext.cli.doctor.cache_check import expected_schema
+from procontext.cli.doctor.models import CheckResult
+from procontext.cli.doctor.output import format_result
 from procontext.config import Settings
 
 if TYPE_CHECKING:
@@ -52,26 +52,26 @@ class TestCheckResult:
 class TestFormatResult:
     def test_ok_with_detail(self) -> None:
         r = CheckResult("Registry", "ok", "100 libraries")
-        line = _format_result(r)
+        line = format_result(r)
         assert "ok" in line
         assert "100 libraries" in line
 
     def test_fail_with_hint(self) -> None:
         r = CheckResult("Registry", "fail", "not found", fix_hint="run setup")
-        line = _format_result(r)
+        line = format_result(r)
         assert "FAIL" in line
         assert "not found" in line
         assert "Fix: run setup" in line
 
     def test_fixed(self) -> None:
         r = CheckResult("Cache", "ok", "recreated", fixed=True)
-        line = _format_result(r)
+        line = format_result(r)
         assert "FIXED" in line
         assert "recreated" in line
 
     def test_warn(self) -> None:
         r = CheckResult("Cache", "warn", "will be created")
-        line = _format_result(r)
+        line = format_result(r)
         assert "WARN" in line
 
 
@@ -189,12 +189,12 @@ class TestCheckRegistry:
 
 class TestExpectedSchema:
     async def test_returns_both_tables(self) -> None:
-        schema = await _expected_schema()
+        schema = await expected_schema()
         assert "page_cache" in schema
         assert "server_metadata" in schema
 
     async def test_page_cache_has_expected_columns(self) -> None:
-        schema = await _expected_schema()
+        schema = await expected_schema()
         col_names = list(schema["page_cache"])
         assert "url_hash" in col_names
         assert "url" in col_names

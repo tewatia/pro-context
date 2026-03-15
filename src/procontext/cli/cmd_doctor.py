@@ -5,24 +5,18 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from procontext.cli.doctor.cache_check import check_cache as _check_cache
-from procontext.cli.doctor.cache_check import expected_schema as _expected_schema
-from procontext.cli.doctor.checks import (
-    check_data_dir as _check_data_dir,
-    check_network as _check_network,
-    check_registry as _check_registry,
-)
-from procontext.cli.doctor.models import CheckResult
-from procontext.cli.doctor.output import format_result as _format_result
+from procontext.cli.doctor.cache_check import check_cache
+from procontext.cli.doctor.checks import check_data_dir
+from procontext.cli.doctor.checks import check_network as _check_network
+from procontext.cli.doctor.checks import check_registry as _check_registry
+from procontext.cli.doctor.output import format_result
 from procontext.fetcher import build_http_client
 from procontext.registry import load_registry
 
 if TYPE_CHECKING:
+    from procontext.cli.doctor.models import CheckResult
     from procontext.config import Settings
 
-async def check_data_dir(settings: Settings, *, fix: bool = False) -> CheckResult:
-    """Validate data directory exists with proper permissions."""
-    return await _check_data_dir(settings, fix=fix)
 
 async def check_registry(settings: Settings, *, fix: bool = False) -> CheckResult:
     """Validate registry files are present, parseable, and checksum-valid."""
@@ -31,11 +25,6 @@ async def check_registry(settings: Settings, *, fix: bool = False) -> CheckResul
         fix=fix,
         load_registry_fn=load_registry,
     )
-
-
-async def check_cache(settings: Settings, *, fix: bool = False) -> CheckResult:
-    """Validate cache database: existence, integrity, and schema."""
-    return await _check_cache(settings, fix=fix)
 
 
 async def check_network(settings: Settings, *, fix: bool = False) -> CheckResult:
@@ -63,7 +52,7 @@ async def run_doctor(settings: Settings, *, fix: bool = False) -> None:
     for result in checks:
         if result.status == "fail" and not result.fixed:
             fail_count += 1
-        print(_format_result(result))  # noqa: T201
+        print(format_result(result))  # noqa: T201
 
     print()  # noqa: T201
     if fail_count == 0:

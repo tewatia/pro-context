@@ -90,9 +90,7 @@ def _can_add_column_in_place(spec: ColumnSpec) -> bool:
     """Return True if a missing column can be added without rebuilding the table."""
     if spec.primary_key:
         return False
-    if spec.not_null and spec.default is None:
-        return False
-    return True
+    return not (spec.not_null and spec.default is None)
 
 
 def _schema_mismatch_detail(
@@ -253,7 +251,7 @@ async def check_cache(settings: Settings, *, fix: bool = False) -> CheckResult:
 
             try:
                 fixes = await _repair_cache_schema(db, expected, journal_mode=journal_mode)
-            except Exception as repair_exc:
+            except (aiosqlite.Error, RuntimeError) as repair_exc:
                 detail = mismatch_detail or journal_detail or f"{db_path}, schema invalid"
                 detail = f"{detail}. In-place repair failed: {repair_exc}"
                 return CheckResult("Cache", "fail", detail, fix_hint=recreate_hint)
@@ -277,7 +275,7 @@ async def check_cache(settings: Settings, *, fix: bool = False) -> CheckResult:
             fixes = list(dict.fromkeys(fixes))
             return CheckResult("Cache", "ok", "; ".join(fixes), fixed=True)
 
-    except Exception as exc:
+    except (aiosqlite.Error, OSError) as exc:
         detail = f"Database is corrupt or unreadable: {db_path} ({exc})"
         if fix:
             detail += ". In-place repair was not attempted to avoid destructive data loss."

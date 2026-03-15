@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 import structlog
@@ -12,6 +12,7 @@ from procontext.models.registry import RegistryEntry, RegistryIndexes
 from procontext.registry.local import _sha256_prefixed
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from procontext.state import AppState

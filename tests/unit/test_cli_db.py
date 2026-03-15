@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from procontext.cli.cmd_db import run_db_recreate
 from procontext.cli.cmd_doctor import check_cache
 from procontext.config import Settings
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 
 class TestRunDbRecreate:
