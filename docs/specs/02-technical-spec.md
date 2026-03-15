@@ -1216,6 +1216,7 @@ Command modules are imported inside the `if/elif/else` branches to avoid loading
 | _(default)_ | `cmd_serve.py` | MCP SDK, FastMCP, uvicorn, full server stack |
 | `setup` | `cmd_setup.py` | httpx, registry |
 | `doctor` | `cmd_doctor.py` | aiosqlite, httpx (only with `--fix`) |
+| `db recreate` | `cmd_db.py` | aiosqlite |
 
 **Legacy shim**: `mcp/startup.py` delegates to `cli.main:main` for backward compatibility with `python -m procontext.mcp.startup`.
 
@@ -1230,7 +1231,7 @@ Command modules are imported inside the `if/elif/else` branches to avoid loading
 3. **Cache database** — parent directory writable, SQLite openable, WAL mode, schema matches expected
 4. **Network** — HEAD request to registry metadata URL
 
-**`--fix` behavior**: When a check fails and is fixable, the check attempts repair before returning. Fixable: missing directories (`mkdir`), missing/corrupt registry (re-download), corrupt/outdated cache DB (delete and recreate via `Cache.init_db()`). Not fixable: permission errors (reports `chmod` command), network failures.
+**`--fix` behavior**: When a check fails and is fixable, the check attempts repair before returning. Fixable: missing directories (`mkdir`), missing/corrupt registry (re-download), cache journal mode drift (`PRAGMA journal_mode=WAL`), and missing cache tables/columns (create missing tables / `ALTER TABLE ... ADD COLUMN` in place). Not fixable: permission errors, unreadable/corrupt cache databases, incompatible cache column definitions, and network failures. For non-fixable cache problems, doctor suggests the destructive fallback command `procontext db recreate`.
 
 **Auto-derived schema validation**: The cache schema check creates an in-memory SQLite database, runs `Cache.init_db()`, and compares the resulting `PRAGMA table_info` against the on-disk database. This stays in sync with `cache.py` automatically — no separate schema definition to maintain.
 

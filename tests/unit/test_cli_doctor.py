@@ -195,13 +195,14 @@ class TestExpectedSchema:
 
     async def test_page_cache_has_expected_columns(self) -> None:
         schema = await _expected_schema()
-        col_names = [name for name, _ in schema["page_cache"]]
+        col_names = list(schema["page_cache"])
         assert "url_hash" in col_names
         assert "url" in col_names
         assert "content" in col_names
         assert "outline" in col_names
         assert "fetched_at" in col_names
         assert "expires_at" in col_names
+        assert "last_checked_at" in col_names
 
 
 class TestCheckCache:
@@ -230,21 +231,24 @@ class TestCheckCache:
         assert result.status == "fail"
         assert "corrupt" in result.detail.lower()
 
-    async def test_db_corrupt_fix_recreates(self, tmp_path: Path) -> None:
+    async def test_db_corrupt_fix_suggests_recreate(self, tmp_path: Path) -> None:
         db_path = tmp_path / "corrupt.db"
         db_path.write_text("this is not a database")
         settings = Settings(cache={"db_path": str(db_path)})  # type: ignore[arg-type]
         result = await check_cache(settings, fix=True)
-        assert result.fixed is True
-        # Verify the recreated DB has valid schema
-        result2 = await check_cache(settings)
-        assert result2.status == "ok"
+        assert result.status == "fail"
+        assert result.fixed is False
+        assert "destructive data loss" in result.detail
+        assert "procontext db recreate" in result.fix_hint
+        assert db_path.read_text() == "this is not a database"
 
     async def test_db_missing_table(self, tmp_path: Path) -> None:
         db_path = tmp_path / "partial.db"
         async with aiosqlite.connect(str(db_path)) as db:
             await db.execute("PRAGMA journal_mode = WAL")
-            await db.execute("CREATE TABLE server_metadata (key TEXT PRIMARY KEY, value TEXT)")
+            await db.execute(
+                "CREATE TABLE server_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
             await db.commit()
         settings = Settings(cache={"db_path": str(db_path)})  # type: ignore[arg-type]
         result = await check_cache(settings)
@@ -275,35 +279,97 @@ class TestCheckCache:
         assert "missing columns" in result.detail.lower()
         assert "outline" in result.detail
 
-    async def test_db_schema_mismatch_fix_recreates(self, tmp_path: Path) -> None:
+    async def test_db_schema_mismatch_fix_migrates_in_place(self, tmp_path: Path) -> None:
         db_path = tmp_path / "old.db"
+        url = "https://example.com/docs"
+        content = "# Title"
         async with aiosqlite.connect(str(db_path)) as db:
             await db.execute("PRAGMA journal_mode = WAL")
             await db.execute(
-                "CREATE TABLE page_cache (url_hash TEXT PRIMARY KEY, url TEXT NOT NULL)"
+                """
+                CREATE TABLE page_cache (
+                    url_hash TEXT PRIMARY KEY,
+                    url TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                )
+                """
             )
             await db.execute(
                 "CREATE TABLE server_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            await db.execute(
+                """
+                INSERT INTO page_cache (url_hash, url, content, fetched_at, expires_at)
+                VALUES ('abc', ?, ?, '2026-01-01T00:00:00+00:00', '2026-01-02T00:00:00+00:00')
+                """,
+                (url, content),
             )
             await db.commit()
         settings = Settings(cache={"db_path": str(db_path)})  # type: ignore[arg-type]
         result = await check_cache(settings, fix=True)
         assert result.fixed is True
-        # Verify fresh schema
+        assert "added columns to page_cache" in result.detail
         result2 = await check_cache(settings)
         assert result2.status == "ok"
+        async with aiosqlite.connect(str(db_path)) as db:
+            cursor = await db.execute(
+                "SELECT url, content, outline, discovered_domains, last_checked_at FROM page_cache"
+            )
+            row = await cursor.fetchone()
+        assert row == (url, content, "", "", None)
 
-    async def test_db_wal_and_shm_cleaned_on_fix(self, tmp_path: Path) -> None:
-        db_path = tmp_path / "cache.db"
-        db_path.write_text("corrupt")
-        (tmp_path / "cache.db-wal").write_text("wal")
-        (tmp_path / "cache.db-shm").write_text("shm")
+    async def test_db_missing_table_fix_creates_table(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "partial.db"
+        async with aiosqlite.connect(str(db_path)) as db:
+            await db.execute("PRAGMA journal_mode = WAL")
+            await db.execute(
+                "CREATE TABLE server_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            await db.commit()
 
         settings = Settings(cache={"db_path": str(db_path)})  # type: ignore[arg-type]
         result = await check_cache(settings, fix=True)
         assert result.fixed is True
-        # WAL and SHM from the corrupt DB should be gone
-        # (new ones may be created by init_db, that's fine)
+        assert "created tables: page_cache" in result.detail
+        result2 = await check_cache(settings)
+        assert result2.status == "ok"
+
+    async def test_db_non_wal_fix_enables_wal_in_place(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "cache.db"
+        async with aiosqlite.connect(str(db_path)) as db:
+            cache = Cache(db)
+            await cache.init_db()
+            await db.execute("PRAGMA journal_mode = DELETE")
+            await db.execute(
+                """
+                INSERT INTO page_cache (
+                    url_hash, url, content, outline, discovered_domains,
+                    fetched_at, expires_at, last_checked_at
+                )
+                VALUES (
+                    'abc', 'https://example.com', '# Title', '1:# Title', '',
+                    '2026-01-01T00:00:00+00:00', '2026-01-02T00:00:00+00:00',
+                    '2026-01-01T00:00:00+00:00'
+                )
+                """
+            )
+            await db.commit()
+
+        settings = Settings(cache={"db_path": str(db_path)})  # type: ignore[arg-type]
+        result = await check_cache(settings, fix=True)
+        assert result.fixed is True
+        assert "enabled WAL mode" in result.detail
+
+        async with aiosqlite.connect(str(db_path)) as db:
+            cursor = await db.execute("PRAGMA journal_mode")
+            journal_mode = (await cursor.fetchone())[0]
+            cursor = await db.execute("SELECT content FROM page_cache WHERE url_hash = 'abc'")
+            row = await cursor.fetchone()
+
+        assert journal_mode.lower() == "wal"
+        assert row == ("# Title",)
 
     async def test_parent_dir_missing(self, tmp_path: Path) -> None:
         db_path = tmp_path / "deep" / "nested" / "cache.db"

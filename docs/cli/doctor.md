@@ -34,8 +34,9 @@ Validates the SQLite cache database in stages:
 
 Schema validation is **automatic** — doctor creates a reference database in memory using the same `Cache.init_db()` that the server uses, then compares column names and types via `PRAGMA table_info`. When `cache.py` changes its schema, doctor picks it up with zero manual updates.
 
-- **Auto-fixable**: corrupt or mismatched DB is deleted (including WAL/SHM side files) and recreated
-- **Not auto-fixable**: permission issues on the parent directory
+- **Auto-fixable**: enable WAL mode, create missing tables, add missing columns in place
+- **Not auto-fixable**: corrupt/unreadable DBs, incompatible column definitions, permission issues on the parent directory
+- **Destructive fallback**: `procontext db recreate` deletes `cache.db` and recreates it with the current schema
 
 ### Network
 
@@ -53,13 +54,30 @@ When `--fix` is passed, each failing check that is auto-fixable attempts repair:
 - If repair succeeds, the check shows `FIXED` with a description of what was done
 - If repair fails, the check shows `FAIL` with the error
 - Checks that cannot be auto-fixed always show a `fix_hint` explaining manual steps
+- Cache repair is intentionally non-destructive: doctor preserves existing rows where possible and only suggests `procontext db recreate` when a clean repair is not possible
+
+## `procontext db recreate`
+
+```bash
+procontext db recreate
+```
+
+This is the destructive cache reset path. It deletes the configured cache database along with any `-wal` and `-shm` side files, then creates a fresh database with the current schema.
+
+Use it when:
+- `procontext doctor --fix` reports that the cache DB is corrupt or unreadable
+- `procontext doctor --fix` reports an incompatible schema that cannot be repaired in place
+- you explicitly want to discard cached content and start from a clean DB
 
 | Check | Auto-fixable | Fix action |
 |-------|-------------|------------|
 | Data dir missing | Yes | Create directories |
 | Registry missing/corrupt | Yes | Re-download from configured URL |
 | Cache parent dir missing | Yes | Create directory |
-| Cache DB corrupt/schema mismatch | Yes | Delete and recreate database |
+| Cache DB journal mode disabled | Yes | Enable WAL mode in place |
+| Cache DB missing tables/columns | Yes | Create missing tables / add missing columns in place |
+| Cache DB corrupt/unreadable | No | Suggest `procontext db recreate` |
+| Cache DB incompatible schema | No | Suggest `procontext db recreate` |
 | Permission errors | No | Reports `chmod` command |
 | Network unreachable | No | Reports error |
 
@@ -86,8 +104,8 @@ ProContext Doctor
     Registry files not found.
     Fix: run 'procontext setup' or 'procontext doctor --fix'
   Cache ............... FAIL
-    Schema mismatch: page_cache missing column 'outline'.
-    Fix: run 'procontext doctor --fix' to recreate the database
+    Schema mismatch — Table 'page_cache': missing columns: outline.
+    Fix: run 'procontext doctor --fix' to attempt in-place repair; if that cannot fix it, run 'procontext db recreate' to replace the cache database
   Network ............. ok (registry reachable)
 
 2 checks failed. Run 'procontext doctor --fix' to attempt auto-repair.
@@ -99,7 +117,7 @@ ProContext Doctor (--fix)
 
   Data directory ...... ok (~/.local/share/procontext)
   Registry ............ FIXED (downloaded 918 libraries, v2026-03-04)
-  Cache ............... FIXED (recreated database)
+  Cache ............... FIXED (enabled WAL mode; added columns to page_cache: outline, discovered_domains, last_checked_at)
   Network ............. ok (registry reachable)
 
 All issues resolved.

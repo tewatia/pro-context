@@ -45,6 +45,10 @@ class TestHelpOutput:
         result = _run_cli(["doctor", "--help"], subprocess_env)
         assert result.returncode == 0
 
+    def test_db_help(self, subprocess_env: dict[str, str]) -> None:
+        result = _run_cli(["db", "--help"], subprocess_env)
+        assert result.returncode == 0
+
 
 class TestDoctorCommand:
     """End-to-end doctor command tests."""
@@ -79,17 +83,35 @@ class TestDoctorCommand:
         result = _run_cli(["doctor", "--fix"], subprocess_env)
         assert "ProContext Doctor (--fix)" in result.stdout
 
-    def test_doctor_fix_recreates_corrupt_cache(
+    def test_doctor_fix_suggests_db_recreate_for_corrupt_cache(
         self, tmp_path: Path, subprocess_env: dict[str, str]
     ) -> None:
-        """--fix repairs a corrupt cache database."""
+        """--fix does not destroy unreadable DBs; it suggests the recreate command."""
         cache_path = tmp_path / "corrupt_cache.db"
         cache_path.write_text("not a database")
         env = {**subprocess_env, "PROCONTEXT__CACHE__DB_PATH": str(cache_path)}
         result = _run_cli(["doctor", "--fix"], env)
-        lines = result.stdout.splitlines()
+        assert result.returncode == 1
+        assert "Cache" in result.stdout
+        assert "FAIL" in result.stdout
+        assert "procontext db recreate" in result.stdout
+
+    def test_db_recreate_replaces_corrupt_cache(
+        self, tmp_path: Path, subprocess_env: dict[str, str]
+    ) -> None:
+        """The dedicated recreate command replaces the cache DB with a fresh schema."""
+        cache_path = tmp_path / "corrupt_cache.db"
+        cache_path.write_text("not a database")
+        env = {**subprocess_env, "PROCONTEXT__CACHE__DB_PATH": str(cache_path)}
+
+        recreate = _run_cli(["db", "recreate"], env)
+        assert recreate.returncode == 0
+        assert "Recreated cache database" in recreate.stdout
+
+        doctor = _run_cli(["doctor"], env)
+        lines = doctor.stdout.splitlines()
         cache_line = next(line for line in lines if "Cache" in line)
-        assert "FIXED" in cache_line
+        assert "ok" in cache_line
 
 
 class TestLegacyEntrypoint:
