@@ -442,13 +442,13 @@ class TestFsyncDirectoryWindowsGuard:
     """Verify _fsync_directory is a no-op on Windows."""
 
     def test_noop_on_win32(self, tmp_path: Path) -> None:
-        with patch("procontext.registry.sys") as mock_sys:
+        with patch("procontext.registry.storage.sys") as mock_sys:
             mock_sys.platform = "win32"
             # Should return without calling os.open or os.fsync
             _fsync_directory(tmp_path)
 
     def test_executes_on_non_windows(self, tmp_path: Path) -> None:
-        with patch("procontext.registry.sys") as mock_sys:
+        with patch("procontext.registry.storage.sys") as mock_sys:
             mock_sys.platform = "linux"
             # On a real filesystem (macOS/Linux CI), this should succeed
             _fsync_directory(tmp_path)
@@ -461,7 +461,7 @@ class TestFsyncDirectoryWindowsGuard:
         registry_path = tmp_path / "registry" / "known-libraries.json"
         state_path = tmp_path / "registry" / "registry-state.json"
 
-        with patch("procontext.registry.sys") as mock_sys:
+        with patch("procontext.registry.storage.sys") as mock_sys:
             mock_sys.platform = "win32"
             save_registry_to_disk(
                 registry_bytes=registry_bytes,
