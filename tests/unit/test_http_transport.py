@@ -8,11 +8,17 @@ runs if the middleware short-circuits.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 
-from procontext.transport import SUPPORTED_PROTOCOL_VERSIONS, MCPSecurityMiddleware
+from procontext.config import Settings
+from procontext.transport import (
+    SUPPORTED_PROTOCOL_VERSIONS,
+    MCPSecurityMiddleware,
+    run_http_server,
+)
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
@@ -216,6 +222,92 @@ async def test_origin_with_no_hostname_blocked() -> None:
     async with _client(app) as client:
         response = await client.get("/mcp", headers={"Origin": "http://"})
     assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# HTTP server startup
+# ---------------------------------------------------------------------------
+
+
+def test_run_http_server_generates_auth_key_and_logs_warning() -> None:
+    fake_mcp = MagicMock()
+    fake_http_app = MagicMock()
+    fake_mcp.streamable_http_app.return_value = fake_http_app
+    settings = Settings(
+        server={
+            "transport": "http",
+            "host": "127.0.0.1",
+            "port": 8081,
+            "auth_enabled": True,
+            "auth_key": "",
+        }
+    )
+
+    fake_log = MagicMock()
+    fake_log.bind.return_value = fake_log
+
+    with (
+        patch("procontext.transport.log", fake_log),
+        patch("procontext.transport.secrets.token_urlsafe", return_value="generated-key") as mock_key,
+        patch("procontext.transport.uvicorn.run") as mock_uvicorn_run,
+    ):
+        run_http_server(fake_mcp, settings)
+
+    mock_key.assert_called_once_with(32)
+    fake_log.bind.assert_called_once_with(transport="http")
+    fake_log.warning.assert_called_once_with(
+        "http_auth_key_auto_generated",
+        auth_key="generated-key",
+    )
+    fake_mcp.streamable_http_app.assert_called_once_with()
+    mock_uvicorn_run.assert_called_once()
+
+    secured_app = mock_uvicorn_run.call_args.args[0]
+    assert isinstance(secured_app, MCPSecurityMiddleware)
+    assert secured_app.app is fake_http_app
+    assert secured_app.auth_enabled is True
+    assert secured_app.auth_key == "generated-key"
+    assert mock_uvicorn_run.call_args.kwargs["host"] == "127.0.0.1"
+    assert mock_uvicorn_run.call_args.kwargs["port"] == 8081
+    assert mock_uvicorn_run.call_args.kwargs["log_config"] is None
+
+
+def test_run_http_server_logs_when_auth_disabled() -> None:
+    fake_mcp = MagicMock()
+    fake_http_app = MagicMock()
+    fake_mcp.streamable_http_app.return_value = fake_http_app
+    settings = Settings(
+        server={
+            "transport": "http",
+            "host": "0.0.0.0",
+            "port": 9090,
+            "auth_enabled": False,
+            "auth_key": "",
+        }
+    )
+
+    fake_log = MagicMock()
+    fake_log.bind.return_value = fake_log
+
+    with (
+        patch("procontext.transport.log", fake_log),
+        patch("procontext.transport.secrets.token_urlsafe") as mock_key,
+        patch("procontext.transport.uvicorn.run") as mock_uvicorn_run,
+    ):
+        run_http_server(fake_mcp, settings)
+
+    mock_key.assert_not_called()
+    fake_log.bind.assert_called_once_with(transport="http")
+    fake_log.warning.assert_called_once_with("http_auth_disabled")
+    mock_uvicorn_run.assert_called_once()
+
+    secured_app = mock_uvicorn_run.call_args.args[0]
+    assert isinstance(secured_app, MCPSecurityMiddleware)
+    assert secured_app.app is fake_http_app
+    assert secured_app.auth_enabled is False
+    assert secured_app.auth_key is None
+    assert mock_uvicorn_run.call_args.kwargs["host"] == "0.0.0.0"
+    assert mock_uvicorn_run.call_args.kwargs["port"] == 9090
 
 
 async def test_bearer_lowercase_returns_401() -> None:
