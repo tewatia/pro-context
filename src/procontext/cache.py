@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS page_cache (
     outline           TEXT NOT NULL DEFAULT '',
     discovered_domains TEXT NOT NULL DEFAULT '',
     fetched_at         TEXT NOT NULL,
-    expires_at         TEXT NOT NULL
+    expires_at         TEXT NOT NULL,
+    last_checked_at    TEXT
 )
 """
 
@@ -70,7 +71,7 @@ class Cache:
         try:
             cursor = await self._db.execute(
                 "SELECT url_hash, url, content, outline, discovered_domains, "
-                "fetched_at, expires_at FROM page_cache WHERE url_hash = ?",
+                "fetched_at, expires_at, last_checked_at FROM page_cache WHERE url_hash = ?",
                 (url_hash,),
             )
             row = await cursor.fetchone()
@@ -79,6 +80,7 @@ class Cache:
 
             fetched_at = datetime.fromisoformat(row[5])
             expires_at = datetime.fromisoformat(row[6])
+            last_checked_at = datetime.fromisoformat(row[7]) if row[7] else None
             stale = datetime.now(UTC) > expires_at
 
             return PageCacheEntry(
@@ -89,6 +91,7 @@ class Cache:
                 discovered_domains=frozenset(row[4].split()),
                 fetched_at=fetched_at,
                 expires_at=expires_at,
+                last_checked_at=last_checked_at,
                 stale=stale,
             )
         except (aiosqlite.Error, ValueError):
@@ -111,8 +114,9 @@ class Cache:
             expires_at = now + timedelta(hours=ttl_hours)
             await self._db.execute(
                 "INSERT OR REPLACE INTO page_cache "
-                "(url_hash, url, content, outline, discovered_domains, fetched_at, expires_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(url_hash, url, content, outline, discovered_domains, "
+                "fetched_at, expires_at, last_checked_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     url_hash,
                     url,
@@ -121,11 +125,23 @@ class Cache:
                     " ".join(sorted(discovered_domains)),
                     now.isoformat(),
                     expires_at.isoformat(),
+                    now.isoformat(),
                 ),
             )
             await self._db.commit()
         except aiosqlite.Error:
             log.warning("cache_write_error", key=f"page:{url_hash}", exc_info=True)
+
+    async def update_last_checked(self, url_hash: str) -> None:
+        """Update only the last_checked_at timestamp. Non-fatal on failure."""
+        try:
+            await self._db.execute(
+                "UPDATE page_cache SET last_checked_at = ? WHERE url_hash = ?",
+                (datetime.now(UTC).isoformat(), url_hash),
+            )
+            await self._db.commit()
+        except aiosqlite.Error:
+            log.warning("cache_update_last_checked_error", key=f"page:{url_hash}", exc_info=True)
 
     # ------------------------------------------------------------------
     # Allowlist restoration

@@ -158,24 +158,26 @@ All matching is against in-memory indexes loaded from the registry at startup. N
   "content": "# Streaming\n\n## Overview\n...",
   "has_more": true,
   "next_offset": 501,
+  "content_hash": "a1b2c3d4e5f6",
   "cached": false,
   "cached_at": null,
   "stale": false
 }
 ```
 
-| Field         | Description                                                                                                                                             |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `outline`     | Compacted structural outline of the page (target: ≤50 entries). Progressive depth reduction removes lower-priority headings (H6 → H5 → fenced content → H4 → H3). When the page outline exceeds 50 entries even after maximum reduction, this field contains a status message directing the agent to use `read_outline` for paginated access. Each entry: `<line_number>:<original line>`. |
-| `total_lines` | Total number of lines in the full page. Useful for determining if more content exists beyond the current window.                                        |
-| `offset`      | The 1-based line number the returned content starts from.                                                                                               |
-| `limit`       | The maximum number of lines requested.                                                                                                                  |
-| `content`     | Page markdown for the requested window (from offset, up to limit lines). May be shorter than limit if the page ends before the window fills.            |
-| `has_more`    | `true` if more content exists beyond the current window. When `true`, call again with `offset=next_offset` to continue reading.                         |
-| `next_offset` | Line number to pass as `offset` to continue reading. `null` if no more content.                                                                        |
-| `cached`      | Whether this response was served from cache                                                                                                             |
-| `cached_at`   | ISO 8601 timestamp (UTC) of when the content was originally fetched. `null` if not cached                                                               |
-| `stale`       | `true` if the source was unreachable and cached content past its TTL is being served as fallback. Always present; defaults to `false`.                   |
+| Field          | Description                                                                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `outline`      | Compacted structural outline of the page (target: ≤50 entries). Progressive depth reduction removes lower-priority headings (H6 → H5 → fenced content → H4 → H3). When the page outline exceeds 50 entries even after maximum reduction, this field contains a status message directing the agent to use `read_outline` for paginated access. Each entry: `<line_number>:<original line>`. |
+| `total_lines`  | Total number of lines in the full page. Useful for determining if more content exists beyond the current window.                                        |
+| `offset`       | The 1-based line number the returned content starts from.                                                                                               |
+| `limit`        | The maximum number of lines requested.                                                                                                                  |
+| `content`      | Page markdown for the requested window (from offset, up to limit lines). May be shorter than limit if the page ends before the window fills.            |
+| `has_more`     | `true` if more content exists beyond the current window. When `true`, call again with `offset=next_offset` to continue reading.                         |
+| `next_offset`  | Line number to pass as `offset` to continue reading. `null` if no more content.                                                                        |
+| `content_hash` | Truncated SHA-256 (12 hex chars) of the full page content. Compare across paginated calls to detect if the underlying page changed due to a background cache refresh. |
+| `cached`       | Whether this response was served from cache                                                                                                             |
+| `cached_at`    | ISO 8601 timestamp (UTC) of when the content was originally fetched. `null` if not cached                                                               |
+| `stale`        | `true` if the cache entry has expired and a background refresh has been triggered. Content is stale but usable. Always present; defaults to `false`.     |
 
 **Notes**:
 
@@ -227,19 +229,21 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
   "total_lines": 45,
   "has_more": false,
   "next_offset": null,
+  "content_hash": "a1b2c3d4e5f6",
   "cached": true,
   "cached_at": "2026-02-23T10:00:00Z"
 }
 ```
 
-| Field         | Description                                                                                                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `outline`     | Compacted structural outline trimmed to the match range (first match line to last match line). Empty string when no matches are found. When the trimmed outline exceeds 50 entries even after maximum reduction, contains a status message directing the agent to `read_outline`. |
-| `matches`     | Matching lines formatted as `<line_number>:<content>`, one per line. Empty string when no matches found.                  |
-| `total_lines` | Total number of lines in the page.                                                                                        |
-| `has_more`    | `true` if more matches exist beyond the returned set.                                                                     |
-| `next_offset` | Line number to pass as `offset` for the next search call to continue paginating. `null` if no more matches.               |
-| `cached`      | Whether the page content was served from cache.                                                                           |
+| Field          | Description                                                                                                               |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `outline`      | Compacted structural outline trimmed to the match range (first match line to last match line). Empty string when no matches are found. When the trimmed outline exceeds 50 entries even after maximum reduction, contains a status message directing the agent to `read_outline`. |
+| `matches`      | Matching lines formatted as `<line_number>:<content>`, one per line. Empty string when no matches found.                  |
+| `total_lines`  | Total number of lines in the page.                                                                                        |
+| `has_more`     | `true` if more matches exist beyond the returned set.                                                                     |
+| `next_offset`  | Line number to pass as `offset` for the next search call to continue paginating. `null` if no more matches.               |
+| `content_hash` | Truncated SHA-256 (12 hex chars) of the full page content. Compare across calls to detect if the underlying page changed. |
+| `cached`       | Whether the page content was served from cache.                                                                           |
 | `cached_at`   | ISO 8601 timestamp (UTC) of when the page was originally fetched. `null` if not cached.                                   |
 
 **Notes**:
@@ -281,6 +285,7 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
   "total_entries": 847,
   "has_more": true,
   "next_offset": 201,
+  "content_hash": "a1b2c3d4e5f6",
   "cached": true,
   "cached_at": "2026-02-23T10:00:00Z",
   "stale": false
@@ -293,9 +298,10 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
 | `total_entries`  | Total number of entries in the full outline (after stripping empty fences).                          |
 | `has_more`      | `true` if more entries exist beyond the current window.                                              |
 | `next_offset`   | Entry index to pass as `offset` to continue paginating. `null` if no more entries.                   |
+| `content_hash`  | Truncated SHA-256 (12 hex chars) of the full page content. Compare across paginated calls to detect if the underlying page changed. |
 | `cached`        | Whether served from cache.                                                                           |
 | `cached_at`     | ISO 8601 timestamp (UTC) of when the page was originally fetched. `null` if not cached.              |
-| `stale`         | `true` if the source was unreachable and cached content past its TTL is being served as fallback. Defaults to `false`. |
+| `stale`         | `true` if the cache entry has expired and a background refresh has been triggered. Content is stale but usable. Defaults to `false`. |
 
 **Notes**:
 
@@ -429,7 +435,9 @@ A single SQLite database stores all fetched content at `cache.db_path` (default:
 
 All fetched content — llms.txt indexes, README files, and documentation pages — is stored in a single `page_cache` table. Both `read_page` and `search_page` share this cache: a page fetched by one tool is immediately available to the other without a re-fetch.
 
-**Stale fallback**: When a cached entry is past its TTL, the server attempts a synchronous re-fetch. If the re-fetch succeeds, the cache is updated and fresh content is returned (`stale: false`). If the re-fetch fails (network error, source unavailable), the stale cached content is served as a fallback with `cached: true` and `stale: true`. This ensures pagination consistency — the agent always reads from a single version of the page within a session — while still providing content when the source is unreachable.
+**Stale-while-revalidate**: When a cached entry is past its TTL, the stale content is returned immediately with `stale: true`, and a background task is spawned to re-fetch and update the cache. The next call to the same URL will get the fresh content if the background refresh has completed. Guards prevent redundant work: an in-memory set tracks in-flight refreshes (no duplicate tasks for the same URL), and a `last_checked_at` timestamp enforces a 15-minute cooldown between refresh attempts.
+
+**Content hash**: Every response from `read_page`, `read_outline`, and `search_page` includes a `content_hash` field — a truncated SHA-256 (12 hex chars) of the full page content. Agents paginating through a page can compare `content_hash` across calls to detect if a background refresh updated the underlying content between paginated reads. If the hash changes, the agent should restart from `offset=1`.
 
 **No memory tier**: SQLite reads are fast enough (<5ms) for this use case. A memory cache adds complexity without meaningful latency benefit for single-user deployments.
 

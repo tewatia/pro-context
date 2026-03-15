@@ -108,17 +108,19 @@ async def read_page(
 
     Response:
       url          — the URL of the fetched page
+      content      — the content window
       outline      — compacted structural outline (target ≤50 entries) with
                      1-based line numbers, e.g. "1:# Title\\n42:## Usage"
       total_lines  — total line count of the full page
       offset       — 1-based line number where the content window starts
       limit        — maximum lines in the content window
-      content      — the content window
       has_more     — true if more content exists beyond the current window
       next_offset  — line number to pass as offset to continue; null if no more
+      content_hash — truncated SHA-256 (12 hex chars); compare across paginated
+                     calls to detect if the underlying page changed
       cached       — true if served from cache
       cached_at    — ISO timestamp of last fetch; null for fresh network responses
-      stale        — true if cache entry expired and re-fetch failed; content is stale
+      stale        — true if cache entry expired; background refresh triggered
 
     If has_more is true, call again with offset=next_offset to continue
     reading. Repeated calls on the same URL are served from cache (sub-100ms).
@@ -165,9 +167,11 @@ async def read_outline(
       total_entries — total outline entries (after stripping empty fences)
       has_more      — true if more entries exist beyond the current window
       next_offset   — entry index to pass as offset to continue; null if no more
+      content_hash  — truncated SHA-256 (12 hex chars); compare across calls
+                      to detect if the underlying page changed
       cached        — true if served from cache
       cached_at     — ISO timestamp of last fetch; null for fresh network responses
-      stale         — true if cache entry expired and re-fetch failed; content is stale
+      stale         — true if cache entry expired; background refresh triggered
     """
     state: AppState = ctx.request_context.lifespan_context
     try:
@@ -236,11 +240,13 @@ async def search_page(
     Response:
       url          — the URL that was searched
       query        — the search query as provided
-      outline      — compacted outline trimmed to match range; empty on zero matches
       matches      — matching lines as 'line_number:content', one per line
+      outline      — compacted outline trimmed to match range; empty on zero matches
       total_lines  — total line count of the page
       has_more     — true if more matches exist beyond the returned set
       next_offset  — line number to pass as offset to continue paginating
+      content_hash — truncated SHA-256 (12 hex chars); compare across calls
+                     to detect if the underlying page changed
       cached       — true if page was served from cache
       cached_at    — ISO timestamp of last fetch; null for fresh responses
     """

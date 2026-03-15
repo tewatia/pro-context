@@ -108,7 +108,7 @@ read_page("https://python.langchain.com/llms.txt")
   ├─ SSRF check: domain in allowlist?
   ├─ Cache check: page:{sha256(url)}
   │    HIT (fresh)  → return cached content + outline
-  │    HIT (stale)  → sync re-fetch; on failure → return stale
+  │    HIT (stale)  → return stale immediately; spawn background refresh
   │    MISS         → continue
   ├─ Fetch: HTTP GET url (30s timeout, SSRF validated per redirect)
   ├─ Store: page_cache (TTL 24h)
@@ -220,6 +220,7 @@ class PageCacheEntry(BaseModel):
     outline: str              # Plain-text structural outline: "<line>:<original line>\n..."
     fetched_at: datetime
     expires_at: datetime
+    last_checked_at: datetime | None = None  # Last background refresh attempt
     stale: bool = False
     discovered_domains: frozenset[str] = frozenset()  # Base domains extracted from content URLs
 ```
@@ -283,6 +284,7 @@ class ReadPageOutput(BaseModel):
     content: str              # Page markdown for the requested window
     has_more: bool             # True if more content exists beyond the current window
     next_offset: int | None    # Line number to pass as offset to continue; None if no more
+    content_hash: str          # Truncated SHA-256 (12 hex chars) of full page content
     cached: bool
     cached_at: datetime | None
     stale: bool = False
@@ -338,6 +340,7 @@ class SearchPageOutput(BaseModel):
     total_lines: int
     has_more: bool
     next_offset: int | None   # Line number for next search call; None if no more matches
+    content_hash: str          # Truncated SHA-256 (12 hex chars) of full page content
     cached: bool
     cached_at: datetime | None
 
@@ -355,6 +358,7 @@ class ReadOutlineOutput(BaseModel):
     total_entries: int        # Total entries after stripping empty fences
     has_more: bool
     next_offset: int | None   # Entry index to continue; None if no more
+    content_hash: str          # Truncated SHA-256 (12 hex chars) of full page content
     cached: bool
     cached_at: datetime | None
     stale: bool = False
@@ -775,7 +779,7 @@ All fetched content — llms.txt indexes, README files, and documentation pages 
 
 **Cleanup**: A periodic task (runs at startup and every 6 hours thereafter) deletes entries where `expires_at < now() - 7 days`. Stale entries are kept up to 7 days to serve as fallback when the source is temporarily unreachable.
 
-### 6.2 Stale Cache Handling
+### 6.2 Stale-While-Revalidate
 
 `Cache.get_page()` marks the entry as stale but does **not** handle the re-fetch — that responsibility belongs to the tool layer, which has the full `AppState` (fetcher, allowlist, settings) needed to do the re-fetch.
 
@@ -792,17 +796,19 @@ async def get_page(self, url_hash: str) -> PageCacheEntry | None:
 # In tools/_shared.py — shared helper used by read_page, search_page, read_outline
 page = await state.cache.get_page(url_hash)
 if page is not None and page.stale:
-    try:
-        return await _fetch_and_cache(url, url_hash, state)  # sync re-fetch
-    except Exception:
-        return FetchResult(..., stale=True)  # fallback to stale content
+    _maybe_spawn_refresh(url, url_hash, state, page)  # background refresh
+    return FetchResult(..., stale=True)  # return stale content immediately
 ```
 
-All page tools use a shared helper (`fetch_or_cached_page`) that encapsulates the full cache-check → fetch → cache-write flow. When a cached entry has expired, the helper attempts a **synchronous re-fetch**. If the re-fetch succeeds, the cache is updated and fresh content is returned. If the re-fetch fails (network error, source unavailable), the stale cached content is returned as a fallback.
+All page tools use a shared helper (`fetch_or_cached_page`) that encapsulates the full cache-check → fetch → cache-write → stale-refresh flow. When a cached entry has expired, the stale content is returned immediately with `stale: true`, and a background task is spawned to refresh the cache. The next call to the same URL will get fresh content if the background refresh has completed.
 
-**Why synchronous instead of background refresh**: A background `asyncio.create_task` refresh introduces a race condition with paginated reads. If the agent reads lines 1–500, the background refresh completes and updates the cache, and then the agent reads lines 501+, the second response contains different content — outline line numbers from the first response no longer correspond to the correct locations. Synchronous re-fetch eliminates this class of inconsistency entirely. The cost is one fetch delay per TTL cycle (typically 1–3 seconds once every 24 hours) — a negligible tradeoff for guaranteed pagination consistency.
+**Background refresh guards**: Two mechanisms prevent redundant work:
+- **In-memory `_refreshing` set** on `AppState`: Tracks URL hashes with in-flight refresh tasks. A second call to the same stale URL while a refresh is running does not spawn a duplicate task.
+- **`last_checked_at` timestamp** in the cache: Updated on every refresh attempt (success or failure). URLs checked within the last 15 minutes are not re-checked, preventing rapid retries when the source is persistently unreachable.
 
-**`stale: true` semantics**: The `stale` field in the response means the source was unreachable and the agent is receiving cached content that is past its TTL. Under normal conditions (source reachable), expired entries are transparently refreshed and `stale` remains `false`.
+**Content hash for pagination consistency**: Every response from `read_page`, `read_outline`, and `search_page` includes a `content_hash` field — a truncated SHA-256 (12 hex chars) of the full page content. If a background refresh updates the cache between paginated calls, the `content_hash` will change, allowing the agent to detect the inconsistency and restart from `offset=1`.
+
+**`stale: true` semantics**: The `stale` field in the response means the cache entry has expired and a background refresh has been triggered. The agent is receiving cached content that is past its TTL. The next call may return fresh content (if the background refresh has completed) with a potentially different `content_hash`.
 
 ### 6.3 Cache Error Handling
 
@@ -1593,7 +1599,9 @@ async def search_page_handler(url: str, query: str, state: AppState) -> dict:
 | `fetch_complete`              | `url`, `status_code`, `content_length`                                               |
 | `fetch_failed`                | `url`, `error`, `status_code`                                                        |
 | `ssrf_blocked`                | `url`, `reason`                                                                      |
-| `cache_stale_refetching`      | `url`                                                                                |
-| `stale_refetch_failed_serving_cached` | `url`, `error`                                                               |
+| `stale_refresh_started`       | `url`                                                                                |
+| `stale_refresh_complete`      | `url`                                                                                |
+| `stale_refresh_failed`        | `url`, `error`                                                                       |
+| `stale_refresh_skipped`       | `url`, `reason` (`already_in_flight` or `cooldown`)                                  |
 | `cache_read_error`            | `key`                                                                                |
 | `cache_write_error`           | `key`                                                                                |

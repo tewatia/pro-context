@@ -32,3 +32,4 @@ class AppState:
     cache: CacheProtocol | None = None
     fetcher: FetcherProtocol | None = None
     allowlist: frozenset[str] = field(default_factory=frozenset)
+    _refreshing: set[str] = field(default_factory=set)

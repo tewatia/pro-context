@@ -108,6 +108,7 @@ async def handle(
         total_lines=total_lines,
         has_more=search_result.has_more,
         next_offset=search_result.next_offset,
+        content_hash=result.content_hash,
         cached=result.cached,
         cached_at=result.cached_at,
     )

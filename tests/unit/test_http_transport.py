@@ -248,7 +248,10 @@ def test_run_http_server_generates_auth_key_and_logs_warning() -> None:
 
     with (
         patch("procontext.transport.log", fake_log),
-        patch("procontext.transport.secrets.token_urlsafe", return_value="generated-key") as mock_key,
+        patch(
+            "procontext.transport.secrets.token_urlsafe",
+            return_value="generated-key",
+        ) as mock_key,
         patch("procontext.transport.uvicorn.run") as mock_uvicorn_run,
     ):
         run_http_server(fake_mcp, settings)

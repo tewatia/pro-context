@@ -63,6 +63,7 @@ async def handle(
         total_entries=total_entries,
         has_more=has_more,
         next_offset=next_offset,
+        content_hash=result.content_hash,
         cached=result.cached,
         cached_at=result.cached_at,
         stale=result.stale,

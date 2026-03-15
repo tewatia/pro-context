@@ -139,61 +139,165 @@ class TestReadPageHandler:
         assert respx.calls.call_count == 1
 
     @respx.mock
-    async def test_stale_cache_refetches_synchronously(self, app_state: AppState) -> None:
-        """Expired cache triggers a synchronous re-fetch, returning fresh content."""
+    async def test_stale_cache_serves_stale_immediately(self, app_state: AppState) -> None:
+        """Expired cache returns stale content immediately and spawns background refresh."""
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        # First call to populate cache
+        await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+
+        # Artificially expire the cached entry and clear last_checked_at.
+        from datetime import UTC, datetime, timedelta
+
+        past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        assert isinstance(app_state.cache, Cache)
+        await app_state.cache._db.execute(  # pyright: ignore[reportPrivateUsage]
+            "UPDATE page_cache SET expires_at = ?, last_checked_at = NULL WHERE url = ?",
+            (past, _SAMPLE_URL),
+        )
+        await app_state.cache._db.commit()  # pyright: ignore[reportPrivateUsage]
+
+        # Second call — stale entry served immediately
+        result = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+        assert result["cached"] is True
+        assert result["stale"] is True
+        assert "# Streaming" in result["content"]
+
+        # Let background refresh complete
+        import asyncio
+
+        await asyncio.sleep(0.1)
+
+    @respx.mock
+    async def test_stale_background_refresh_updates_cache(self, app_state: AppState) -> None:
+        """Background refresh updates the cache so the next call gets fresh content."""
         updated_page = "# Updated\n\nNew content."
         respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
 
         # First call to populate cache
         await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
 
-        # Artificially expire the cached entry.
+        # Artificially expire the cached entry and clear last_checked_at.
         from datetime import UTC, datetime, timedelta
 
         past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         assert isinstance(app_state.cache, Cache)
         await app_state.cache._db.execute(  # pyright: ignore[reportPrivateUsage]
-            "UPDATE page_cache SET expires_at = ? WHERE url = ?",
+            "UPDATE page_cache SET expires_at = ?, last_checked_at = NULL WHERE url = ?",
             (past, _SAMPLE_URL),
         )
         await app_state.cache._db.commit()  # pyright: ignore[reportPrivateUsage]
 
-        # Mock returns updated content for the re-fetch
+        # Mock returns updated content for the background re-fetch
         respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=updated_page))
 
-        # Second call — stale entry triggers sync re-fetch, returns fresh content
+        # Second call — returns stale, background refresh starts
         result = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
-        assert result["cached"] is False
-        assert result["stale"] is False
-        assert "# Updated" in result["content"]
+        assert result["stale"] is True
+
+        # Let background refresh complete
+        import asyncio
+
+        await asyncio.sleep(0.1)
+
+        # Third call — cache is now fresh
+        result2 = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+        assert result2["cached"] is True
+        assert result2["stale"] is False
+        assert "# Updated" in result2["content"]
 
     @respx.mock
-    async def test_stale_cache_fallback_on_fetch_error(self, app_state: AppState) -> None:
-        """When re-fetch fails on stale entry, stale content is served as fallback."""
+    async def test_content_hash_present_and_stable(self, app_state: AppState) -> None:
+        """content_hash is a 12-char hex string, consistent across calls."""
         respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
 
-        # First call to populate cache
+        r1 = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+        assert len(r1["content_hash"]) == 12
+        assert all(c in "0123456789abcdef" for c in r1["content_hash"])
+
+        r2 = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+        assert r1["content_hash"] == r2["content_hash"]
+
+    @respx.mock
+    async def test_content_hash_changes_when_content_changes(self, app_state: AppState) -> None:
+        """content_hash differs when the underlying page content changes."""
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        r1 = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+
+        # Directly update content in cache
+        assert isinstance(app_state.cache, Cache)
+        await app_state.cache._db.execute(  # pyright: ignore[reportPrivateUsage]
+            "UPDATE page_cache SET content = ? WHERE url = ?",
+            ("# Different content\n\nChanged.", _SAMPLE_URL),
+        )
+        await app_state.cache._db.commit()  # pyright: ignore[reportPrivateUsage]
+
+        r2 = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+        assert r1["content_hash"] != r2["content_hash"]
+
+    @respx.mock
+    async def test_stale_no_duplicate_background_tasks(self, app_state: AppState) -> None:
+        """Multiple calls to a stale URL don't spawn duplicate background tasks."""
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
         await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
 
-        # Artificially expire the cached entry.
+        # Expire cache and clear last_checked_at
         from datetime import UTC, datetime, timedelta
 
         past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         assert isinstance(app_state.cache, Cache)
         await app_state.cache._db.execute(  # pyright: ignore[reportPrivateUsage]
-            "UPDATE page_cache SET expires_at = ? WHERE url = ?",
+            "UPDATE page_cache SET expires_at = ?, last_checked_at = NULL WHERE url = ?",
             (past, _SAMPLE_URL),
         )
         await app_state.cache._db.commit()  # pyright: ignore[reportPrivateUsage]
 
-        # Mock returns an error for the re-fetch
-        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(500))
+        # First stale call spawns a background task
+        await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+        import hashlib
 
-        # Second call — re-fetch fails, falls back to stale content
+        url_hash = hashlib.sha256(_SAMPLE_URL.encode()).hexdigest()
+        assert url_hash in app_state._refreshing
+
+        # Second stale call skips because already in-flight
+        await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+        # Only 2 HTTP calls: initial fetch + 1 background refresh (not 2)
+        import asyncio
+
+        await asyncio.sleep(0.1)
+        assert url_hash not in app_state._refreshing
+
+    @respx.mock
+    async def test_stale_respects_last_checked_cooldown(self, app_state: AppState) -> None:
+        """Recently-checked stale entries don't trigger background refresh."""
+        respx.get(_SAMPLE_URL).mock(return_value=httpx.Response(200, text=_SAMPLE_PAGE))
+
+        await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
+
+        # Expire cache but set last_checked_at to now (within cooldown)
+        from datetime import UTC, datetime, timedelta
+
+        past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        now = datetime.now(UTC).isoformat()
+        assert isinstance(app_state.cache, Cache)
+        await app_state.cache._db.execute(  # pyright: ignore[reportPrivateUsage]
+            "UPDATE page_cache SET expires_at = ?, last_checked_at = ? WHERE url = ?",
+            (past, now, _SAMPLE_URL),
+        )
+        await app_state.cache._db.commit()  # pyright: ignore[reportPrivateUsage]
+
         result = await read_page_handle(_SAMPLE_URL, 1, 500, app_state)
-        assert result["cached"] is True
         assert result["stale"] is True
-        assert "# Streaming" in result["content"]
+
+        # No background task was spawned
+        import hashlib
+
+        url_hash = hashlib.sha256(_SAMPLE_URL.encode()).hexdigest()
+        assert url_hash not in app_state._refreshing
+        # Only 1 HTTP call (the initial fetch)
+        assert respx.calls.call_count == 1
 
     @respx.mock
     async def test_windowing_offset_and_limit(self, app_state: AppState) -> None:
@@ -322,6 +426,7 @@ class TestReadPageHandler:
             "content",
             "has_more",
             "next_offset",
+            "content_hash",
             "cached",
             "cached_at",
             "stale",
@@ -619,6 +724,7 @@ class TestSearchPageHandler:
             "total_lines",
             "has_more",
             "next_offset",
+            "content_hash",
             "cached",
             "cached_at",
         }
@@ -668,6 +774,7 @@ class TestReadOutlineHandler:
             "total_entries",
             "has_more",
             "next_offset",
+            "content_hash",
             "cached",
             "cached_at",
             "stale",

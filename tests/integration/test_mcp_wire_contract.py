@@ -95,15 +95,16 @@ def _seed_page_cache(
                 outline            TEXT NOT NULL DEFAULT '',
                 discovered_domains TEXT NOT NULL DEFAULT '',
                 fetched_at         TEXT NOT NULL,
-                expires_at         TEXT NOT NULL
+                expires_at         TEXT NOT NULL,
+                last_checked_at    TEXT
             )
             """
         )
         conn.execute(
             """
             INSERT OR REPLACE INTO page_cache
-            (url_hash, url, content, outline, fetched_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (url_hash, url, content, outline, fetched_at, expires_at, last_checked_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 url_hash,
@@ -112,6 +113,7 @@ def _seed_page_cache(
                 outline,
                 now.isoformat(),
                 expires_at.isoformat(),
+                now.isoformat(),
             ),
         )
         conn.commit()

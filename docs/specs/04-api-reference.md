@@ -475,11 +475,15 @@ For pages where the outline is replaced by a status message (very large pages), 
       "type": ["integer", "null"],
       "description": "Line number to pass as offset to continue reading. Null if no more content."
     },
+    "content_hash": {
+      "type": "string",
+      "description": "Truncated SHA-256 (12 hex chars) of the full page content. Compare across paginated calls to detect content changes."
+    },
     "cached": { "type": "boolean" },
     "cached_at": { "type": ["string", "null"], "format": "date-time" },
-    "stale": { "type": "boolean", "description": "True if the cache entry has expired and the re-fetch failed. Content is stale but usable." }
+    "stale": { "type": "boolean", "description": "True if the cache entry has expired. A background refresh has been triggered. Content is stale but usable." }
   },
-  "required": ["url", "outline", "total_lines", "offset", "limit", "content", "has_more", "next_offset", "cached", "cached_at", "stale"]
+  "required": ["url", "outline", "total_lines", "offset", "limit", "content", "has_more", "next_offset", "content_hash", "cached", "cached_at", "stale"]
 }
 ```
 
@@ -509,6 +513,7 @@ Result:
   "content": "# Docs by LangChain\n\n## Concepts\n\n- [Chat Models](https://docs.langchain.com/docs/concepts/chat_models.md): Interface for language models...\n...",
   "has_more": false,
   "next_offset": null,
+  "content_hash": "a1b2c3d4e5f6",
   "cached": false,
   "cached_at": null,
   "stale": false
@@ -535,6 +540,7 @@ Result:
   "content": "### Using .stream()\n\nThe `.stream()` method returns an iterator...\n...",
   "has_more": true,
   "next_offset": 28,
+  "content_hash": "a1b2c3d4e5f6",
   "cached": true,
   "cached_at": "2026-02-23T10:00:00Z",
   "stale": false
@@ -666,10 +672,14 @@ This tool is the equivalent of `grep` for documentation pages. It supports liter
       "type": ["integer", "null"],
       "description": "Line number to pass as offset for the next search call to continue paginating. Null if no more matches."
     },
+    "content_hash": {
+      "type": "string",
+      "description": "Truncated SHA-256 (12 hex chars) of the full page content. Compare across calls to detect content changes."
+    },
     "cached": { "type": "boolean" },
     "cached_at": { "type": ["string", "null"], "format": "date-time" }
   },
-  "required": ["url", "query", "outline", "matches", "total_lines", "has_more", "next_offset", "cached", "cached_at"]
+  "required": ["url", "query", "outline", "matches", "total_lines", "has_more", "next_offset", "content_hash", "cached", "cached_at"]
 }
 ```
 
@@ -694,6 +704,7 @@ Result:
   "total_lines": 45,
   "has_more": false,
   "next_offset": null,
+  "content_hash": "a1b2c3d4e5f6",
   "cached": true,
   "cached_at": "2026-02-23T10:00:00Z"
 }
@@ -718,6 +729,7 @@ Result:
   "total_lines": 65,
   "has_more": true,
   "next_offset": 8,
+  "content_hash": "b2c3d4e5f6a1",
   "cached": true,
   "cached_at": "2026-02-23T11:00:00Z"
 }
@@ -812,11 +824,15 @@ Result contains the next batch of matches starting from line 8.
       "type": ["integer", "null"],
       "description": "Entry index to pass as offset to continue paginating. Null if no more entries."
     },
+    "content_hash": {
+      "type": "string",
+      "description": "Truncated SHA-256 (12 hex chars) of the full page content. Compare across paginated calls to detect content changes."
+    },
     "cached": { "type": "boolean" },
     "cached_at": { "type": ["string", "null"], "format": "date-time" },
-    "stale": { "type": "boolean", "description": "True if the cache entry has expired and the re-fetch failed. Content is stale but usable." }
+    "stale": { "type": "boolean", "description": "True if the cache entry has expired. A background refresh has been triggered. Content is stale but usable." }
   },
-  "required": ["url", "outline", "total_entries", "has_more", "next_offset", "cached", "cached_at", "stale"]
+  "required": ["url", "outline", "total_entries", "has_more", "next_offset", "content_hash", "cached", "cached_at", "stale"]
 }
 ```
 
@@ -839,6 +855,7 @@ Result:
   "total_entries": 847,
   "has_more": true,
   "next_offset": 1001,
+  "content_hash": "a1b2c3d4e5f6",
   "cached": true,
   "cached_at": "2026-02-23T10:00:00Z",
   "stale": false

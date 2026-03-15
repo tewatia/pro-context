@@ -15,4 +15,5 @@ class PageCacheEntry(BaseModel):
     discovered_domains: frozenset[str] = frozenset()  # Base domains found in content
     fetched_at: datetime
     expires_at: datetime
+    last_checked_at: datetime | None = None  # Last time a background refresh was attempted
     stale: bool = False

@@ -60,6 +60,7 @@ class ReadPageInput(BaseModel):
 
 class ReadPageOutput(BaseModel):
     url: str = Field(description="The URL of the fetched page.")
+    content: str = Field(description="Content window lines.")
     outline: str = Field(
         description=(
             "Compacted structural outline (target ≤50 entries). "
@@ -69,10 +70,15 @@ class ReadPageOutput(BaseModel):
     total_lines: int = Field(description="Total number of lines in the full page.")
     offset: int = Field(description="1-based line number where the content window starts.")
     limit: int = Field(description="Maximum number of lines in the content window.")
-    content: str = Field(description="Content window lines.")
     has_more: bool = Field(description="True if more content exists beyond the current window.")
     next_offset: int | None = Field(
         description="Line number to pass as offset to continue reading. Null if no more content."
+    )
+    content_hash: str = Field(
+        description=(
+            "Truncated SHA-256 of the page content (12 hex chars). "
+            "Compare across paginated calls to detect if the underlying page changed."
+        )
     )
     cached: bool = Field(description="True if served from cache.")
     cached_at: datetime | None = Field(
@@ -81,8 +87,8 @@ class ReadPageOutput(BaseModel):
     stale: bool = Field(
         default=False,
         description=(
-            "True if the cache entry has expired and the re-fetch failed."
-            " Content is stale but usable."
+            "True if the cache entry has expired. A background refresh has been"
+            " triggered. Content is stale but usable."
         ),
     )
 
@@ -127,6 +133,12 @@ class ReadOutlineOutput(BaseModel):
     next_offset: int | None = Field(
         description="Entry index to pass as offset to continue. Null if no more entries."
     )
+    content_hash: str = Field(
+        description=(
+            "Truncated SHA-256 of the page content (12 hex chars). "
+            "Compare across paginated calls to detect if the underlying page changed."
+        )
+    )
     cached: bool = Field(description="True if served from cache.")
     cached_at: datetime | None = Field(
         description="When this page was last fetched. Null for fresh network fetches."
@@ -134,8 +146,8 @@ class ReadOutlineOutput(BaseModel):
     stale: bool = Field(
         default=False,
         description=(
-            "True if the cache entry has expired and the re-fetch failed."
-            " Content is stale but usable."
+            "True if the cache entry has expired. A background refresh has been"
+            " triggered. Content is stale but usable."
         ),
     )
 
@@ -187,21 +199,27 @@ class SearchPageInput(BaseModel):
 class SearchPageOutput(BaseModel):
     url: str = Field(description="The URL that was searched.")
     query: str = Field(description="The search query as provided.")
-    outline: str = Field(
-        description=(
-            "Compacted outline trimmed to match range. Empty string when no matches found."
-        )
-    )
     matches: str = Field(
         description=(
             "Matching lines formatted as '<line_number>:<content>', one per line. "
             "Empty string when no matches found."
         )
     )
+    outline: str = Field(
+        description=(
+            "Compacted outline trimmed to match range. Empty string when no matches found."
+        )
+    )
     total_lines: int = Field(description="Total number of lines in the page.")
     has_more: bool = Field(description="True if more matches exist beyond the returned set.")
     next_offset: int | None = Field(
         description="Line number to pass as offset to continue paginating. Null if no more."
+    )
+    content_hash: str = Field(
+        description=(
+            "Truncated SHA-256 of the page content (12 hex chars). "
+            "Compare across calls to detect if the underlying page changed."
+        )
     )
     cached: bool = Field(description="True if served from cache.")
     cached_at: datetime | None = Field(

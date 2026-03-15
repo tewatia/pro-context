@@ -1,14 +1,16 @@
 """Shared fetch logic for page-based tools (read_page, search_page).
 
-Encapsulates the full cache-check → fetch → cache-write flow. Tool handlers
-call ``fetch_or_cached_page`` and then apply their own output formatting on
-the result.
+Encapsulates the full cache-check → fetch → cache-write → stale-refresh
+flow. Tool handlers call ``fetch_or_cached_page`` and then apply their
+own output formatting on the result.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from os.path import splitext
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse, urlunparse
@@ -20,11 +22,12 @@ from procontext.fetcher import expand_allowlist_from_content, is_url_allowed
 from procontext.parser import parse_outline
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from procontext.state import AppState
 
 log = structlog.get_logger()
+
+# How long to wait before retrying a background refresh for the same URL.
+_RECHECK_COOLDOWN = timedelta(minutes=15)
 
 
 @dataclass(frozen=True)
@@ -34,18 +37,27 @@ class FetchResult:
     url: str
     content: str
     outline: str
+    content_hash: str
     cached: bool
     cached_at: datetime | None
     stale: bool
+
+
+def _content_hash(content: str) -> str:
+    """Return a truncated SHA-256 hex digest of the content (12 chars)."""
+    return hashlib.sha256(content.encode()).hexdigest()[:12]
 
 
 async def fetch_or_cached_page(url: str, state: AppState) -> FetchResult:
     """Cache-check → network fetch → cache-write for a single page URL.
 
     Handles SSRF validation, cache lookup, .md probing, outline parsing,
-    allowlist expansion, and cache write. When a cached entry has expired,
-    a synchronous re-fetch is attempted; on failure the stale content is
-    returned as a fallback.
+    allowlist expansion, cache write, and stale background refresh.
+
+    When a cached entry has expired, stale content is returned immediately
+    and a background task is spawned to refresh the cache. Duplicate
+    background tasks for the same URL are prevented by an in-memory set,
+    and recently-checked URLs are not re-fetched for a cooldown period.
 
     Raises:
         RuntimeError: if cache or fetcher are not initialised.
@@ -81,25 +93,29 @@ async def fetch_or_cached_page(url: str, state: AppState) -> FetchResult:
             url=cached_entry.url,
             content=cached_entry.content,
             outline=cached_entry.outline,
+            content_hash=_content_hash(cached_entry.content),
             cached=True,
             cached_at=cached_entry.fetched_at,
             stale=False,
         )
 
     if cached_entry is not None and cached_entry.stale:
-        log.info("cache_stale_refetching", url=url)
-        try:
-            return await _fetch_and_cache(url, url_hash, state)
-        except Exception:
-            log.warning("stale_refetch_failed_serving_cached", url=url, exc_info=True)
-            return FetchResult(
-                url=cached_entry.url,
-                content=cached_entry.content,
-                outline=cached_entry.outline,
-                cached=True,
-                cached_at=cached_entry.fetched_at,
-                stale=True,
-            )
+        log.info("cache_hit", stale=True, url=url)
+        _maybe_spawn_refresh(
+            url=cached_entry.url,
+            url_hash=url_hash,
+            state=state,
+            cached_entry=cached_entry,
+        )
+        return FetchResult(
+            url=cached_entry.url,
+            content=cached_entry.content,
+            outline=cached_entry.outline,
+            content_hash=_content_hash(cached_entry.content),
+            cached=True,
+            cached_at=cached_entry.fetched_at,
+            stale=True,
+        )
 
     # Cache miss — fetch from network.
     return await _fetch_and_cache(url, url_hash, state)
@@ -108,6 +124,79 @@ async def fetch_or_cached_page(url: str, state: AppState) -> FetchResult:
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
+
+
+def _maybe_spawn_refresh(
+    url: str,
+    url_hash: str,
+    state: AppState,
+    cached_entry: object,
+) -> None:
+    """Spawn a background refresh task if appropriate.
+
+    Skips if:
+    - A refresh for this URL is already in-flight
+    - The URL was checked within the cooldown period
+    """
+    if url_hash in state._refreshing:
+        log.debug("stale_refresh_skipped", reason="already_in_flight", url=url)
+        return
+
+    from procontext.models.cache import PageCacheEntry
+
+    if isinstance(cached_entry, PageCacheEntry) and cached_entry.last_checked_at is not None:
+        elapsed = datetime.now(UTC) - cached_entry.last_checked_at
+        if elapsed < _RECHECK_COOLDOWN:
+            log.debug(
+                "stale_refresh_skipped",
+                reason="cooldown",
+                url=url,
+                elapsed_s=elapsed.total_seconds(),
+            )
+            return
+
+    state._refreshing.add(url_hash)
+    asyncio.create_task(_background_refresh(url=url, url_hash=url_hash, state=state))
+
+
+async def _background_refresh(
+    url: str,
+    url_hash: str,
+    state: AppState,
+) -> None:
+    """Re-fetch a page in the background for stale cache entries.
+
+    Fire-and-forget — all exceptions are caught and logged.
+    Updates ``last_checked_at`` on both success and failure to
+    prevent immediate retries.
+    """
+    log.info("stale_refresh_started", url=url)
+    try:
+        if state.fetcher is None or state.cache is None:
+            log.warning("stale_refresh_skipped", reason="fetcher_or_cache_not_initialized")
+            return
+
+        content = await _fetch_with_md_probe(url, state)
+        outline = parse_outline(content)
+
+        discovered_domains = expand_allowlist_from_content(content, state)
+
+        await state.cache.set_page(
+            url=url,
+            url_hash=url_hash,
+            content=content,
+            outline=outline,
+            ttl_hours=state.settings.cache.ttl_hours,
+            discovered_domains=discovered_domains,
+        )
+        log.info("stale_refresh_complete", url=url)
+    except Exception:
+        log.warning("stale_refresh_failed", url=url, exc_info=True)
+        # Update last_checked_at even on failure to prevent immediate retry
+        if state.cache is not None:
+            await state.cache.update_last_checked(url_hash)
+    finally:
+        state._refreshing.discard(url_hash)
 
 
 async def _fetch_and_cache(url: str, url_hash: str, state: AppState) -> FetchResult:
@@ -134,6 +223,7 @@ async def _fetch_and_cache(url: str, url_hash: str, state: AppState) -> FetchRes
         url=url,
         content=content,
         outline=outline,
+        content_hash=_content_hash(content),
         cached=False,
         cached_at=None,
         stale=False,
