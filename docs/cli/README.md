@@ -2,6 +2,11 @@
 
 ProContext provides a small set of CLI commands alongside the MCP server. The CLI uses Python's `argparse` with subcommands — no additional dependencies.
 
+## Installation
+
+- [installation.md](installation.md) — end-user installation with `install.sh` and `install.ps1`
+- [installer-maintenance.md](installer-maintenance.md) — maintainer contract for the installer scripts
+
 ## Commands
 
 ### `procontext` (no arguments)

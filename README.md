@@ -1,4 +1,4 @@
-<div align="center">
+<div align="left">
 
 # ProContext
 
@@ -44,21 +44,16 @@ ProContext is an open-source [MCP](https://modelcontextprotocol.io) server that 
 
 ## Quick Start
 
-**Recommended** - once published to PyPI:
+> We are not yet on PyPI. Use the installer scripts below until then.
+
+Install ProContext:
 
 ```bash
-uvx procontext
+curl -fsSL https://raw.githubusercontent.com/procontexthq/procontext/main/install.sh | bash
 ```
 
-> Not yet on PyPI. Use the method below until then.
-
-**In the meantime** - clone and run:
-
-```bash
-git clone https://github.com/procontexthq/procontext.git
-cd procontext
-uv sync
-uv run procontext setup   # download the library registry (one-time)
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/procontexthq/procontext/main/install.ps1 | iex"
 ```
 
 Add to your MCP client config:
@@ -68,11 +63,13 @@ Add to your MCP client config:
   "mcpServers": {
     "procontext": {
       "command": "uv",
-      "args": ["run", "--project", "/path/to/procontext", "procontext"]
+      "args": ["run", "--project", "/path/to/procontext-source", "procontext"]
     }
   }
 }
 ```
+
+Use the managed checkout path printed by the installer. If you prefer a manual checkout flow, see [Installation](#installation).
 
 ---
 
@@ -106,7 +103,19 @@ read_page({ "url": "https://python.langchain.com/llms.txt" })
   }
 ```
 
-**Step 3 — Search within a page**
+**Step 3 — Browse the full page (or index) outline**
+
+```
+read_outline({ "url": "https://python.langchain.com/llms.txt" })
+
+→ {
+    "outline": "1:# LangChain\n3:## Concepts\n15:## How-to Guides\n...",
+    "total_entries": 18,
+    "has_more": false
+  }
+```
+
+**Step 4 — Search within a page**
 
 ```
 search_page({ "url": "https://python.langchain.com/llms.txt", "query": "streaming" })
@@ -117,7 +126,7 @@ search_page({ "url": "https://python.langchain.com/llms.txt", "query": "streamin
   }
 ```
 
-The agent resolves a library, reads the index or pages directly, and searches within them — jumping to relevant sections via the outline. ProContext fetches from known, pre-validated sources and caches the results for subsequent calls.
+The agent resolves a library, reads the index or pages directly, browses full outlines when needed, and searches within pages to jump to the right section. ProContext fetches from known, pre-validated sources and caches the results for subsequent calls.
 
 ---
 
@@ -125,15 +134,12 @@ The agent resolves a library, reads the index or pages directly, and searches wi
 
 AI coding agents hallucinate API details because their training data ages. A library ships a breaking change; the agent's weights don't reflect it; the generated code doesn't work.
 
-Existing approaches each have a ceiling:
+There are two common failure modes:
 
-| Approach               | Examples       | Accuracy | Limitation                                                                 |
-| ---------------------- | -------------- | -------- | -------------------------------------------------------------------------- |
-| **Server-side search** | Context7       | 65–75%   | Server must interpret vague user intent; requires expensive query model    |
-| **Agent-side RAG**     | Custom setups  | 90%+     | Agent must discover and validate sources itself; brittle at scale          |
-| **ProContext**         | _This project_ | **90%+** | Agent navigates pre-validated, always-fresh sources; no discovery overhead |
+- Server-side search requires the server to guess what the agent actually means, which gets expensive and brittle when the query is vague.
+- Agent-side RAG can work well, but every client has to rediscover, validate, and maintain documentation sources on its own.
 
-ProContext's approach: build a curated registry of known-good documentation sources at build time, then serve them on demand at runtime. The agent's LLM already knows what it's looking for - ProContext just gets it there reliably.
+ProContext takes a different approach: build a curated registry of known-good documentation sources ahead of time, then serve those sources on demand at runtime. The agent's LLM already knows what it's looking for; ProContext gets it there reliably.
 
 ---
 
@@ -161,14 +167,30 @@ Config, cache, and data paths resolve automatically on Windows, macOS, and Linux
 
 ## Installation
 
-**Requirements**: Python 3.12+, [uv](https://docs.astral.sh/uv/)
+The supported installer entrypoints are the repository-root scripts [install.sh](install.sh) and [install.ps1](install.ps1).
+
+Quick install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/procontexthq/procontext/main/install.sh | bash
+```
+
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/procontexthq/procontext/main/install.ps1 | iex"
+```
+
+The installers clone or refresh a managed checkout from GitHub, ensure `git` and `uv` are available, sync a runtime-only environment with `uv sync --no-dev`, and run the one-time `procontext setup` step unless you skip it.
+
+Manual install is still available:
 
 ```bash
 git clone https://github.com/procontexthq/procontext.git
 cd procontext
-uv sync
-uv run procontext setup   # download the library registry (one-time, requires network)
+uv sync --no-dev
+uv run --project . procontext setup
 ```
+
+Full install and troubleshooting guide: [docs/cli/installation.md](docs/cli/installation.md)
 
 > **First-time setup**: `procontext setup` downloads and persists the library registry to your platform data directory. The server cannot start without it. If you skip this step, the server will attempt a one-time auto-setup on first run - if the network is unavailable at that point, it will exit with an actionable error.
 
@@ -177,7 +199,7 @@ uv run procontext setup   # download the library registry (one-time, requires ne
 Your MCP client (Claude Code, Cursor, Windsurf) spawns and manages the server process automatically - you don't need to run anything manually. The command below is only needed if you want to test the server directly, for example to verify your setup:
 
 ```bash
-uv run procontext
+uv run --project /path/to/procontext procontext
 ```
 
 ### HTTP mode
@@ -202,7 +224,7 @@ cache:
 ```
 
 ```bash
-uv run procontext
+uv run --project /path/to/procontext procontext
 ```
 
 Alternatively, settings can be passed directly as environment variables using the `PROCONTEXT__` prefix:
@@ -211,7 +233,7 @@ Alternatively, settings can be passed directly as environment variables using th
 PROCONTEXT__SERVER__TRANSPORT=http \
 PROCONTEXT__SERVER__HOST=127.0.0.1 \
 PROCONTEXT__SERVER__PORT=8080 \
-uv run procontext
+uv run --project /path/to/procontext procontext
 ```
 
 ---
@@ -295,7 +317,7 @@ A managed hosted version and enterprise self-deployable options are coming. If y
 
 ---
 
-<div align="center">
+<div align="left">
 
 **Built with ❤️ for AI coding agents**
 

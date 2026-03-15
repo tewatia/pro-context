@@ -31,6 +31,8 @@ uv sync --dev
 
 This creates a virtual environment and installs all runtime + dev dependencies.
 
+The repository-root installer scripts are not the contributor setup path. They are runtime installers for end users and intentionally use `uv sync --no-dev`. See [docs/cli/installer-maintenance.md](docs/cli/installer-maintenance.md) if you need to change or validate those scripts.
+
 Verify the setup:
 
 ```bash
