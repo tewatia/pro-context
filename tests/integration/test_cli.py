@@ -114,6 +114,22 @@ class TestDoctorCommand:
         assert "ok" in cache_line
 
 
+class TestSetupCommand:
+    def test_setup_failure_suggests_doctor(
+        self, tmp_path: Path, subprocess_env: dict[str, str]
+    ) -> None:
+        env = {
+            **subprocess_env,
+            "PROCONTEXT__DATA_DIR": str(tmp_path),
+            "PROCONTEXT__CACHE__DB_PATH": str(tmp_path / "cache.db"),
+            "PROCONTEXT__REGISTRY__METADATA_URL": "http://127.0.0.1:1/registry_metadata.json",
+        }
+
+        result = _run_cli(["setup"], env)
+        assert result.returncode == 1
+        assert "procontext doctor --fix" in result.stderr
+
+
 class TestLegacyEntrypoint:
     """The old mcp.startup module still works as a shim."""
 

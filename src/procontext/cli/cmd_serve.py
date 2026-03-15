@@ -43,7 +43,11 @@ def run_server(settings: Settings) -> None:
     if not asyncio.run(_ensure_registry(settings)):
         log.critical(
             "registry_not_initialised",
-            hint="Run 'procontext setup' to download the registry.",
+            hint=(
+                "Run 'procontext setup' to download the registry. "
+                "If local state looks a little unwell, summon the doctor with "
+                "'procontext doctor --fix'."
+            ),
         )
         sys.exit(1)
 

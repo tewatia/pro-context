@@ -312,6 +312,7 @@ def test_server_exits_cleanly_when_registry_missing(tmp_path: Path) -> None:
 
     assert proc.returncode == 1
     assert "procontext setup" in proc.stderr
+    assert "procontext doctor --fix" in proc.stderr
     # Must NOT crash with an exception group traceback.
     assert "ExceptionGroup" not in proc.stderr
     assert "BaseExceptionGroup" not in proc.stderr

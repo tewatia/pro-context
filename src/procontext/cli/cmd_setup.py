@@ -44,6 +44,8 @@ async def run_setup(settings: Settings) -> None:
     else:
         print(  # noqa: T201 — CLI command, not MCP server
             "Setup failed. Check your network and try again.\n"
+            "If local state looks a little unwell, summon the doctor with\n"
+            "'procontext doctor --fix'.\n"
             "If the error persists, you can manually download the registry\n"
             "and configure its path in procontext.yaml",
             file=sys.stderr,
